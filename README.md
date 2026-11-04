@@ -2,7 +2,7 @@
 
 このプロジェクトは、`shared_data/<日付>/<session_id>/metadata.sqlite3`から`is_dino_ready=1`の器具だけを読み、リサイズなしのRGB・depth・mask cropとDINOv3の空間特徴量をCNN向けに出力する。入力SQLiteは読み取り専用で扱う。
 
-受け渡し先向けのフォルダー構成と最小SQL schemaについては、[CNNチーム向けDINOv3受け渡し仕様](docs/cnn_delivery_handoff.md)を参照する。
+受け渡し先向けのフォルダー構成とSQL schemaの正本は[CNN出力契約](docs/contracts/cnn_delivery.md)、共有手順は[CNNチーム向けDINOv3受け渡し仕様](docs/cnn_delivery_handoff.md)を参照する。
 
 ## セットアップ
 
@@ -47,7 +47,7 @@ uv run python -c "import torch; print('PyTorch:', torch.__version__); print('CUD
 uv run python src/dinov3_pipeline/entrypoints/deliver.py
 ```
 
-引数は不要である（VS Codeでは、このファイルを開いてF5で実行・デバッグできる）。出力versionやモデルなどの切り替えは、`configs/default.yaml`または`DINOV3_<項目名>`の環境変数（例: `DINOV3_DATASET_VERSION`）で行う。
+引数は不要である（VS Codeでは、このファイルを開いてF5で実行・デバッグできる）。`dataset_version` は指定不要で、通常は `capture_v001` から連番で自動採番する。モデルなどの切り替えは、`configs/default.yaml`または`DINOV3_<項目名>`の環境変数で行う。未使用のversion名を明示する場合だけ `dataset_version` または `DINOV3_DATASET_VERSION` を指定する。
 
 通常の入力は`shared_data/<日付>/<session_id>/metadata.sqlite3`である。全session DBを読み取り専用で走査し、`sam3_dino_results.is_dino_ready=1`のみを対象にする。抽出前後に承認状態と原本hashを再確認する。
 
@@ -55,7 +55,7 @@ uv run python src/dinov3_pipeline/entrypoints/deliver.py
 
 ## 出力仕様
 
-送付先は`delivery_root`で設定し、既定値は`C:\work\SPD\dinov3_delivery`である。同じ`dataset_version`への再出力は上書きせずエラーにするため、再実行時はversionを変える。
+送付先は`delivery_root`で設定し、既定値は`C:\work\SPD\dinov3_delivery`である。自動採番はCNN・debug・予約記録の最大番号+1とし、毎回別directoryへ出力する。同じversionへの明示再出力は上書きせずエラーにする。内部の `.dataset_versions/` に予約記録を残して並行実行の重複を防ぐため、予約後の失敗は欠番となる。この記録を削除しないこと。詳細は[自動採番仕様](docs/dataset_version_autonumbering.md)を参照する。
 
 ```text
 dinov3_delivery/
@@ -70,7 +70,7 @@ dinov3_delivery/
   debug/runs/<dataset_version>/issues.csv
 ```
 
-RGB・depth・maskはmaskのforeground boundsを含む同じcrop座標で切り出し、resize/paddingは行わない。crop外のRGBとdepthは0にするが、元ファイルは変更しない。depthはDINOv3へは入力せず、CNN用cropとして保存する。特徴量NPYは`float32`の`(Hpatch, Wpatch, C)`である。
+RGB・depth・maskはmaskのforeground boundsを含む同じcrop座標で切り出し、resize/paddingは行わない。RGBはmask外を0にする。depthは通常実行の既定`mask_depth: false`ではcrop内のmask外も元値を保ち、`true`時だけmask外を0にする。元ファイルは変更しない。depthはDINOv3へは入力せず、CNN用cropとして保存する。特徴量NPYは`float32`の`(Hpatch, Wpatch, C)`である。
 
 CNN用SQLiteは`dataset_metadata`と`samples`の2テーブルだけである。sample行には`sample_id`、`instrument_uid`、`session_id`、`image_id`、`capture_date`と、RGB/depth/mask/featureのbundle相対pathを保存する。モデル名、重みのSHA-256、cropサイズ、特徴量layoutはdataset単位のmetadataにまとめる。出力versionは上書きしない。
 

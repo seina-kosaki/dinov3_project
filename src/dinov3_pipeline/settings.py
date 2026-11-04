@@ -1,7 +1,7 @@
 """configs/default.yaml と環境変数から実行設定を読み込む。
 
 責務:
-    環境・運用で変わる値（入出力パス、データセット版、モデル、cropサイズ）を型付きで提供する。
+    環境・運用で変わる値（入出力パス、データセット版、モデル、cropサイズ、depthのmask有無）を型付きで提供する。
     固定値は担わず、constants.py に置く。
 
 処理の流れ:
@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     """実行設定。モデルとcropサイズは設定だけで切り替えられる。
 
     Note:
+        dataset_version が None の場合、実行起点が入力取得後に連番を予約する。
         crop_size がモデルの patch size で割り切れるかは、モデル読込後に抽出器が検証する。
         repo_dir と weights_path の存在も、抽出器がモデル読込時に確認する。
     """
@@ -55,13 +56,14 @@ class Settings(BaseSettings):
 
     data_root: Path
     delivery_root: Path
-    dataset_version: str = Field(pattern=f"^{SAFE_NAME_PATTERN}$")
+    dataset_version: str | None = Field(default=None, pattern=f"^{SAFE_NAME_PATTERN}$")
     repo_dir: Path
     model_name: str
     weights_path: Path
     pretrain_dataset: str
     device: str | None = None
     crop_size: int = Field(gt=0)
+    mask_depth: bool
     sqlite_timeout_seconds: float = Field(gt=0)
 
     @field_validator("data_root", "delivery_root", "repo_dir", "weights_path")
@@ -125,8 +127,8 @@ class Settings(BaseSettings):
         settings_cls: type[BaseSettings],
         init_settings: PydanticBaseSettingsSource,
         env_settings: PydanticBaseSettingsSource,
-        dotenv_settings: PydanticBaseSettingsSource,
-        file_secret_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,  # noqa: ARG003 - overrideの引数名を保持し、dotenvは採用しない
+        file_secret_settings: PydanticBaseSettingsSource,  # noqa: ARG003 - overrideの引数名を保持し、secret sourceは採用しない
     ) -> tuple[PydanticBaseSettingsSource, ...]:
         """引数・環境変数・YAMLの順に優先して設定を合成する。
 

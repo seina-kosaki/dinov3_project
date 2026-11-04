@@ -1,13 +1,15 @@
 """RGB・depth・maskに共通する固定サイズcropを、リサイズなしで生成する。
 
 責務:
-    3つの画像を同じ座標・同じ寸法で切り出し、mask外のRGBとdepthを0にする。
+    3つの画像を同じ座標・同じ寸法で切り出し、mask外のRGBを0にする。
+    depthは指定に応じてmask外を0にするか、crop内の生値を保つ。
     承認状態の検証やファイル出力は担わない。
 
 処理の流れ:
     1. RGB・mask・depthを開き、寸法の一致を確認する。
     2. maskの前景範囲が収まる位置にcrop枠を決める（画像端では内側へ寄せる）。
-    3. 同じ枠で3画像を切り出し、mask外を0にする。
+    3. 同じ枠で3画像を切り出し、RGB背景を0にする。
+    4. depthは設定に応じてmask背景を0にするか、生値のままにする。
 
 関連ファイル:
     domain/models.py（ReadySample）、infrastructure/dinov3_extractor.py、
@@ -38,15 +40,18 @@ class CroppedInputs:
     crop_box: tuple[int, int, int, int]
 
 
-def prepare_crop(sample: ReadySample, crop_size: int) -> CroppedInputs:
+def prepare_crop(
+    sample: ReadySample, crop_size: int, mask_depth: bool = True
+) -> CroppedInputs:
     """mask物体を含む固定サイズcropを、リサイズせずに作成する。
 
     Args:
         sample: RGB・mask・depthのパスを持つ承認済み物体。
         crop_size: 正方形cropの辺長（画素）。
+        mask_depth: Trueならdepthのmask外を0にし、Falseならcrop内の生値を保つ。
 
     Returns:
-        背景を0にしたRGB・二値mask・depthと、元画像座標のcrop範囲。
+        背景を0にしたRGB・二値mask・指定に応じて処理したdepthと、元画像座標のcrop範囲。
 
     Raises:
         DataContractError: 寸法不一致、空mask、またはcropに物体が収まらない場合。
@@ -66,11 +71,14 @@ def prepare_crop(sample: ReadySample, crop_size: int) -> CroppedInputs:
         Image.new("RGB", (crop_size, crop_size), RGB_BACKGROUND),
         cropped_mask,
     )
-    cropped_depth = Image.composite(
-        depth.crop(crop_box),
-        Image.new(depth.mode, (crop_size, crop_size), DEPTH_BACKGROUND),
-        cropped_mask,
-    )
+    cropped_depth = depth.crop(crop_box)
+    if mask_depth:
+        # CNNが対象物以外の距離を使わない設定では、mask外だけを0にする
+        cropped_depth = Image.composite(
+            cropped_depth,
+            Image.new(depth.mode, (crop_size, crop_size), DEPTH_BACKGROUND),
+            cropped_mask,
+        )
     return CroppedInputs(cropped_rgb, cropped_mask, cropped_depth, crop_box)
 
 
@@ -135,7 +143,11 @@ def _centered_crop_box(
     left_bound, top_bound, right_bound, bottom_bound = bounds
     # 物体を縮めると画素間隔が変わるため、収まらない物体は拒否する
     if right_bound - left_bound > crop_size or bottom_bound - top_bound > crop_size:
-        raise DataContractError(f"対象maskが設定crop_sizeに収まらない: {sample_id}")
+        raise DataContractError(
+            f"対象maskが設定crop_sizeに収まらない: {sample_id}, "
+            f"crop_size={crop_size}, foreground_width={right_bound - left_bound}, "
+            f"foreground_height={bottom_bound - top_bound}"
+        )
 
     width, height = image_size
     # 前景の中心に合わせたうえで、画像端では内側へ寄せて枠を画像内に保つ

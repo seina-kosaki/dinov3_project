@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "type": "command",
+        "command": "uv run --no-project --python 3.12 .github/hooks/pre_tool_use.py",
+        "env": {
+          "PYTHONIOENCODING": "utf-8"
+        },
+        "timeoutSec": 10
+      }
+    ]
+  }
+}

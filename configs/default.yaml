@@ -1,18 +1,24 @@
 # 相対パスはこのファイルの位置が基準。DINOV3_<項目名> の環境変数で上書きできる。
+# 入力session SQLite（<日付>/<session_id>/metadata.sqlite3）を探索するroot
 data_root: ../../shared_data
+# CNN bundle・debug・採番予約記録を保存する出力root
 delivery_root: ../../dinov3_delivery
-dataset_version: capture_v001
+# dataset_version省略時はcapture_v001から連番で自動採番する。明示指定は未使用名のみ可。
 
 # facebookresearch/dinov3 をcloneしたディレクトリ（torch.hub の local ソース）
 repo_dir: ../third_party/dinov3
 # hubconf.py のエントリ名: dinov3_vits16 / vits16plus / vitb16 / vitl16 / vitl16plus / vith16plus / vit7b16
-model_name: dinov3_vitb16
+model_name: dinov3_vits16
 # Metaの配布ページから取得した重み。vitl16 はファイル名末尾の -<8桁hash>.pth を残す
 weights_path: ../weights/dinov3_vits16_pretrain_lvd1689m-08c60483.pth
 # 重みの事前学習データ。正規化統計の選択に使う（lvd1689m / sat493m）
 pretrain_dataset: lvd1689m
 
+# PyTorch device string（cuda:0 / cpuなど）。nullはCUDA利用可ならCUDA、それ以外CPUを自動選択
 device: null
-# 実測のready maskの最大寸法(581x577)を収め、patch size 16で割り切れる値
+# RGB・depth・mask共通の正方形crop辺長（px）。実測ready maskの最大寸法(581x577)を収め、patch size 16で割り切れる値
 crop_size: 640
+# true: depthのmask外を0にする / false: crop内のdepth生値をそのまま保存する
+mask_depth: false
+# 入力SQLiteのlock待機秒数（正数）
 sqlite_timeout_seconds: 10.0

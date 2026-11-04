@@ -1,22 +1,13 @@
 {
-    // ================================================================
-    // Python: 保存時の整形・自動修正 (Ruff)
-    // ================================================================
     "[python]": {
         "editor.formatOnSave": true,
         "editor.defaultFormatter": "charliermarsh.ruff",
         "editor.codeActionsOnSave": {
-            // 保存時にRuffで自動修正とインポート整理を実行
             "source.fixAll.ruff": "explicit",
             "source.organizeImports.ruff": "explicit"
         }
     },
-    // プロジェクトの .venv (uv) にインストールされた版を使い、CLI実行 (uv run ruff) と結果を揃える
     "ruff.importStrategy": "fromEnvironment",
-
-    // ================================================================
-    // 型チェック: Pylanceの型チェックは切り、Mypyに一任する
-    // ================================================================
     "python.analysis.typeCheckingMode": "off",
     "python.analysis.ignore": ["**/*_pb2.py", "**/*_pb2_grpc.py", "**/*.pyi"],
     "python.analysis.exclude": [
@@ -27,68 +18,28 @@
         "**/*_pb2_grpc.py",
         "**/*.pyi"
     ],
-    "mypy-type-checker.args": [
-        "--config-file=${workspaceFolder}/mypy.toml"
-    ],
-    // .venv のmypyを使い、CLI実行 (uv run mypy) と結果を揃える
+    "mypy-type-checker.args": ["--config-file=${workspaceFolder}/pyproject.toml"],
     "mypy-type-checker.importStrategy": "fromEnvironment",
-    // 開いているファイルだけでなくワークスペース全体の型エラーを問題パネルに出す
     "mypy-type-checker.reportingScope": "workspace",
-
-    // ================================================================
-    // テスト (pytest)
-    // ================================================================
     "python.testing.pytestEnabled": true,
     "python.testing.unittestEnabled": false,
-    "python.testing.pytestArgs": ["tests"],
-
-    // ================================================================
-    // Copilot
-    // ================================================================
-    // チャット応答を日本語に固定
+    "python.testing.pytestArgs": ["tests", ".github/hooks/tests"],
     "github.copilot.chat.localeOverride": "ja",
-    // 生成コードの問題 (Ruff/Mypyの診断など) をエージェントが自動で修正する
-    "github.copilot.chat.agent.autoFix": true,
-    // SCMの「✨」ボタンで生成するコミットメッセージにも規約を適用する
-    "github.copilot.chat.commitMessageGeneration.instructions": [
-        { "file": ".github/commit-instructions.md" }
-    ],
-
-    // ================================================================
-    // Docstring 自動生成 (autoDocstring) / ファイルヘッダ (Auto Snippet)
-    // ================================================================
-    "autoDocstring.docstringFormat": "google",
-    "autoDocstring.guessTypes": true,
-    "autoDocstring.includeExtendedSummary": true,
-    "autoSnippet.snippets": [
-        {
-            "pattern": "**/*.py",
-            "language": "python",
-            "snippet": "pyheader_template"
-        }
-    ],
-
-    // ================================================================
-    // エディタ・ファイル
-    // ================================================================
     "editor.suggestSelection": "first",
     "editor.snippetSuggestions": "top",
     "editor.tabCompletion": "on",
     "files.insertFinalNewline": true,
     "files.trimFinalNewlines": true,
     "files.trimTrailingWhitespace": true,
-    // Markdownは行末の半角スペース2つが改行を意味するため除外
     "[markdown]": {
         "files.trimTrailingWhitespace": false
     },
-    // エクスプローラーから生成物のキャッシュを隠す
     "files.exclude": {
         "**/__pycache__": true,
         "**/.mypy_cache": true,
         "**/.ruff_cache": true,
         "**/.pytest_cache": true
     },
-    // 大容量フォルダ (学習データ・重み・実験結果) を監視・検索の対象から外し、動作を軽くする
     "files.watcherExclude": {
         "**/.venv/**": true,
         "data/**": true,
@@ -100,13 +51,5 @@
         "data": true,
         "weights": true,
         "runs": true
-    },
-
-    // ================================================================
-    // Git
-    // ================================================================
-    "git-identity.authors": [
-        "Seina, Kosaki/小崎聖那 kssi21%40Y001.yaskawa.co.jp"
-    ],
-    "git-identity.showEmail": "always",
+    }
 }

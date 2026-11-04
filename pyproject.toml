@@ -44,12 +44,107 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
 pythonpath = ["src"]
+testpaths = ["tests", ".github/hooks/tests"]
 
-[tool.poe.tasks]
-check = [
-  { cmd = "ruff check --fix --quiet --output-format concise" },
-  { cmd = "ruff format --quiet" },
-  { cmd = "mypy --config-file mypy.toml --no-error-summary src" },
+[tool.ruff]
+line-length = 250
+extend-exclude = [
+    "*_pb2.py",
+    "*_pb2_grpc.py",
+    "*_pb2.pyi",
+    ".venv",
+    "build",
+    "third_party",
 ]
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F", "I", "N", "D", "UP", "ANN", "S", "B", "COM", "C90",
+    "DTZ", "EM", "ERA", "FBT", "FIX", "PD", "PIE", "PL", "PTH", "Q",
+    "RET", "RUF", "SIM", "T20", "TD", "TRY", "ARG", "CPY", "FURB",
+]
+ignore = [
+    "E501", "E741", "F401", "F403", "F405", "N806", "N812",
+    "D200", "D205", "D212", "D403", "D415", "ANN401",
+    "S101", "S311", "S404", "S603", "S607", "B008",
+    "COM812", "COM819", "C901", "DTZ", "EM101", "EM102", "TRY003",
+    "ERA001", "FBT001", "FBT002", "FBT003", "FIX002", "TD003", "PD",
+    "PIE790", "PLR0911", "PLR0912", "PLR0913", "PLR0915", "PLW0603",
+    "PTH", "Q", "RET504", "RET505", "RUF001", "RUF002", "RUF003",
+    "RUF005", "SIM108", "SIM114", "T201", "ARG002", "CPY001",
+    "FURB113", "FA100", "TC004",
+]
+fixable = ["ALL"]
+unfixable = ["F841", "ERA001", "T201"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/generated/*.py" = ["ALL"]
+"tests/*" = ["S101"]
+"__init__.py" = ["F401", "D"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.pylint]
+max-public-methods = 30
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+show_error_codes = true
+incremental = true
+cache_dir = ".mypy_cache"
+explicit_package_bases = true
+files = ["src"]
+mypy_path = "src"
+strict = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+disallow_any_generics = true
+disallow_untyped_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+implicit_reexport = true
+strict_equality = true
+allow_redefinition = true
+exclude = [
+    '^.*_pb2\.py$',
+    '^.*_pb2_grpc\.py$',
+    '^.*_pb2\.pyi$',
+    'src/generated/.*',
+    '\.venv/',
+    'third_party/.*',
+]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = [
+    "cv2",
+    "cv2.*",
+    "vision_pb2",
+    "vision_pb2_grpc",
+    "yolact.*",
+    "yolo.*",
+    "grpc.*",
+    "google.protobuf.*",
+    "yaml.*",
+    "pandas.*",
+    "matplotlib.*",
+    "halcon.*",
+    "skimage.*",
+    "torchvision.*",
+    "pytest.*",
+    "open3d.*",
+    "keyboard.*",
+    "scipy.*",
+    "numpy.*",
+    "ultralytics.*",
+]
+ignore_missing_imports = true
+ignore_errors = true

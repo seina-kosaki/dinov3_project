@@ -7,11 +7,12 @@
 処理の流れ:
     1. 設定（configs/default.yaml と環境変数）を読み込む。
     2. 全session DBから is_dino_ready=1 の物体を読む。
-    3. DINOv3抽出器を作り、抽出と公開を実行して件数を報告する。
+    3. 有効な入力があれば、出力versionを予約する。
+    4. DINOv3抽出器を作り、抽出と公開を実行して件数を報告する。
 
 関連ファイル:
     settings.py、usecase/delivery.py、infrastructure/session_repository.py、
-    infrastructure/dinov3_extractor.py。
+    infrastructure/dataset_version.py、infrastructure/dinov3_extractor.py。
 
 設計意図:
     引数なしで実行・デバッグ（F5）できるよう、切り替えたい値は設定ファイルか環境変数で渡す。
@@ -27,6 +28,7 @@ import logging
 
 from dinov3_pipeline.constants import EXIT_ERROR, EXIT_OK, EXIT_PARTIAL_FAILURE
 from dinov3_pipeline.domain.models import DataContractError
+from dinov3_pipeline.infrastructure.dataset_version import reserve_dataset_version
 from dinov3_pipeline.infrastructure.dinov3_extractor import Dinov3FeatureExtractor
 from dinov3_pipeline.infrastructure.session_repository import SessionSam3Repository
 from dinov3_pipeline.settings import load_settings
@@ -55,6 +57,10 @@ def main() -> int:
             )
             return EXIT_ERROR
 
+        dataset_version = reserve_dataset_version(
+            settings.delivery_root, settings.dataset_version
+        )
+        LOGGER.info("delivery version: %s", dataset_version)
         extractor = Dinov3FeatureExtractor(
             settings.repo_dir,
             settings.model_name,
@@ -69,7 +75,8 @@ def main() -> int:
             extractor,
             settings.delivery_root,
             settings.crop_size,
-            settings.dataset_version,
+            dataset_version,
+            settings.mask_depth,
         )
     except (DataContractError, OSError, ValueError, RuntimeError):
         LOGGER.exception("DINOv3のdeliveryが失敗した")
@@ -77,7 +84,7 @@ def main() -> int:
 
     LOGGER.info(
         "delivery %s: 完了%s/%s、PCA%s件、issue%s件",
-        settings.dataset_version,
+        dataset_version,
         summary.completed_count,
         summary.eligible_count,
         summary.output.visualization_count,

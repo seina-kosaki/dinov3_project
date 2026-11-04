@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from collections.abc import Callable
 from pathlib import Path
@@ -28,6 +29,7 @@ from dinov3_pipeline.domain.models import (
     ReadySample,
     SampleLoadResult,
 )
+from dinov3_pipeline.infrastructure.preprocessing import prepare_crop
 from dinov3_pipeline.infrastructure.session_repository import SessionSam3Repository
 from dinov3_pipeline.usecase.delivery import run_delivery
 
@@ -175,3 +177,36 @@ def test_run_delivery_no_samples_raises_contract_error(
             CROP_SIZE,
             VERSION,
         )
+
+
+def test_run_delivery_crop_failure_logs_once_and_excludes_sample(
+    session_root: tuple[Path, Path],
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """crop超過の診断は既存の抽出境界で一度通知し、公開しない。"""
+    repository = SessionSam3Repository(session_root[0], TIMEOUT_SECONDS)
+    crop_size = 32
+
+    class CropExtractor(ArrayExtractor):
+        """crop検証を行うダミー抽出器。"""
+
+        def extract(self, sample: ReadySample, destination: Path) -> FeatureArtifact:
+            """実際のcrop検証を通して抽出失敗を再現する。"""
+            prepare_crop(sample, crop_size)
+            return super().extract(sample, destination)
+
+    with caplog.at_level(logging.ERROR), pytest.raises(DataContractError, match="全てのready sample"):
+        run_delivery(
+            repository.load_ready_samples(), repository, CropExtractor(),
+            tmp_path / "delivery", crop_size, VERSION,
+        )
+    assert len(caplog.records) == 1
+    record = caplog.records[0]
+    assert record.name == "dinov3_pipeline.usecase.delivery"
+    assert record.exc_info is not None
+    assert isinstance(record.exc_info[1], DataContractError)
+    assert "crop_size=32, foreground_width=64, foreground_height=64" in caplog.text
+    assert capsys.readouterr() == ("", "")
+    assert not (tmp_path / "delivery" / "cnn").exists()

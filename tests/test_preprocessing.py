@@ -119,16 +119,27 @@ def test_prepare_crop_valid_input_zeroes_background(
     assert np.all(background == 0)
 
 
+@pytest.mark.parametrize("mask_box", [(0, 0, 64, 16), (0, 0, 16, 64), (0, 0, 64, 64)])
 def test_prepare_crop_object_larger_than_crop_raises_without_resizing(
     make_sample: SampleFactory,
+    mask_box: tuple[int, int, int, int],
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """crop寸法を超える物体は、縮めずに拒否する。"""
     # 準備
-    sample = make_sample(mask_box=(0, 0, 64, 64))
+    sample = make_sample(mask_box=mask_box)
 
     # 実行・検証
-    with pytest.raises(DataContractError, match="収まらない"):
+    with pytest.raises(DataContractError, match="収まらない") as caught:
         prepare_crop(sample, CROP_SIZE)
+    assert str(caught.value) == (
+        f"対象maskが設定crop_sizeに収まらない: {sample.sample_id}, "
+        f"crop_size={CROP_SIZE}, foreground_width={mask_box[2]}, "
+        f"foreground_height={mask_box[3]}"
+    )
+    assert capsys.readouterr() == ("", "")
+    assert not caplog.records
 
 
 def test_prepare_crop_empty_mask_raises_contract_error(

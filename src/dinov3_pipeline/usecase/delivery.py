@@ -59,6 +59,7 @@ def run_delivery(
     delivery_root: Path,
     crop_size: int,
     dataset_version: str,
+    mask_depth: bool = True,
 ) -> DeliverySummary:
     """承認済み物体から特徴量を抽出し、CNN bundleとdebugを公開する。
 
@@ -69,6 +70,7 @@ def run_delivery(
         delivery_root: 送付root。
         crop_size: crop辺長。
         dataset_version: 出力version。
+        mask_depth: Trueならdepthのmask外を0にし、Falseならcrop内の生値を保存する。
 
     Returns:
         公開結果と、対象・完了・失敗の件数。
@@ -109,7 +111,7 @@ def run_delivery(
         if not records:
             raise DataContractError("全てのready sampleでDINO抽出に失敗した")
         output = export_delivery(
-            delivery_root, crop_size, dataset_version, records, issues
+            delivery_root, crop_size, dataset_version, records, issues, mask_depth
         )
 
     return DeliverySummary(

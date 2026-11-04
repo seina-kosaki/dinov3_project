@@ -97,6 +97,7 @@ def export_delivery(
     dataset_version: str,
     records: list[tuple[ReadySample, FeatureArtifact]],
     issues: list[str],
+    mask_depth: bool = True,
 ) -> DeliveryOutput:
     """CNN bundleとdebug出力を、一時ディレクトリ経由で公開する。
 
@@ -106,6 +107,7 @@ def export_delivery(
         dataset_version: 出力を識別する不変のversion。
         records: 承認済み物体と抽出済み特徴量の組。
         issues: 読込・抽出の段階で除外した理由。
+        mask_depth: Trueならdepthのmask外を0にし、Falseならcrop内の生値を保存する。
 
     Returns:
         公開したbundleとdebugの場所、件数。
@@ -137,7 +139,9 @@ def export_delivery(
         for name in (RGB_DIR, DEPTH_DIR, MASK_DIR, FEATURE_DIR):
             (bundle / name).mkdir(parents=True)
 
-        result = _write_samples(records, crop_size, dataset_version, bundle, debug)
+        result = _write_samples(
+            records, crop_size, dataset_version, bundle, debug, mask_depth
+        )
         if not result.rows:
             raise DataContractError("CNN bundleへ出力できるcropがない")
         model_name, weights_sha256 = next(iter(models))
@@ -147,6 +151,7 @@ def export_delivery(
             crop_size,
             (model_name, weights_sha256),
             result.rows,
+            mask_depth,
         )
         all_issues = [*issues, *result.issues]
         _write_issues(debug / RUNS_DIR / dataset_version / ISSUES_FILE, all_issues)
@@ -168,6 +173,7 @@ def _write_samples(
     dataset_version: str,
     bundle: Path,
     debug: Path,
+    mask_depth: bool,
 ) -> _WriteResult:
     """物体ごとにcrop・特徴量・PCA画像を書き出す。
 
@@ -177,6 +183,7 @@ def _write_samples(
         dataset_version: 出力version。
         bundle: 一時のCNN bundle。
         debug: 一時のdebug root。
+        mask_depth: Trueならdepthのmask外を0にする。
 
     Returns:
         書き出せた行と、除外理由。
@@ -191,7 +198,7 @@ def _write_samples(
         try:
             _validate_segment(sample.capture_date, "capture date")
             _validate_segment(sample.session_id, "session ID")
-            cropped = prepare_crop(sample, crop_size)
+            cropped = prepare_crop(sample, crop_size, mask_depth)
             data = np.load(artifact.path, allow_pickle=False)
             if data.dtype != np.dtype(FEATURE_DTYPE) or data.ndim != FEATURE_NDIM:
                 raise DataContractError(
@@ -248,6 +255,7 @@ def _write_database(
     crop_size: int,
     model: tuple[str, str],
     rows: list[tuple[str, ...]],
+    mask_depth: bool,
 ) -> None:
     """CNNが必要とするIDとbundle相対パスだけをSQLiteへ保存する。
 
@@ -257,6 +265,7 @@ def _write_database(
         crop_size: crop辺長。
         model: （モデル名, 重みのSHA-256）。
         rows: samplesテーブルの行。
+        mask_depth: depthにmaskを適用したか。
     """
     connection = sqlite3.connect(path)
     try:
@@ -267,6 +276,7 @@ def _write_database(
             (
                 ("dataset_version", dataset_version),
                 ("crop_size", str(crop_size)),
+                ("mask_depth", str(mask_depth).lower()),
                 ("feature_layout", FEATURE_LAYOUT),
                 ("feature_dtype", FEATURE_DTYPE),
                 ("model_name", model[0]),

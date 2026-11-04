@@ -1,0 +1,88 @@
+{
+  "$schema": "https://bendera.github.io/vscode-commit-message-editor/schemas/config-v1.schema.json",
+  "configVersion": "1",
+  "staticTemplate": [
+    "feat: Summary",
+    "",
+    "# --- 変更内容 ---",
+    "Description",
+    "",
+    "# --- なぜこの変更が必要か (理由/背景) ---",
+    "Reason",
+    "",
+    "# --- 影響範囲 (影響を受けるモジュールやAPIなど) ---",
+    "Scope",
+    "",
+    "# --- 備考 (Issue番号など) ---",
+    "Issue #"
+  ],
+  "dynamicTemplate": [
+    "{type}: {description}",
+    "",
+    "# --- 変更内容 ---",
+    "{body}",
+    "",
+    "# --- なぜこの変更が必要か (理由/背景) ---",
+    "{reason}",
+    "",
+    "# --- 影響範囲 (影響を受けるモジュールやAPIなど) ---",
+    "{scope_detail}",
+    "",
+    "# --- 備考 (Issue番号など) ---",
+    "{note}"
+  ],
+  "tokens": [
+    {
+      "label": "タイプ",
+      "name": "type",
+      "type": "enum",
+      "description": "変更の種類を選択してください ",
+      "options": [
+        { "label": "feat: 新機能 ", "value": "feat" },
+        { "label": "fix: バグ修正 ", "value": "fix" },
+        { "label": "docs: 文書 ", "value": "docs" },
+        { "label": "style: 整形 ", "value": "style" },
+        { "label": "refactor: 改善 ", "value": "refactor" },
+        { "label": "chore: 雑用 ", "value": "chore" }
+      ]
+    },
+    {
+      "label": "要約 (50文字以内)",
+      "name": "description",
+      "description": "コミットの簡潔な要約 ",
+      "type": "text",
+      "multiline": false
+    },
+    {
+      "label": "変更内容",
+      "name": "body",
+      "description": "どのような変更を行ったか ",
+      "type": "text",
+      "multiline": true,
+      "lines": 3
+    },
+    {
+      "label": "なぜこの変更が必要か",
+      "name": "reason",
+      "description": "変更の理由や背景 ",
+      "type": "text",
+      "multiline": true,
+      "lines": 3
+    },
+    {
+      "label": "影響範囲",
+      "name": "scope_detail",
+      "description": "影響を受けるモジュールやAPIなど ",
+      "type": "text",
+      "multiline": true,
+      "lines": 2
+    },
+    {
+      "label": "備考",
+      "name": "note",
+      "description": "Issue番号など ",
+      "type": "text",
+      "multiline": false
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+# 相対パスはこのファイルの位置が基準。DINOV3_<項目名> の環境変数で上書きできる。
+data_root: ../../shared_data
+delivery_root: ../../dinov3_delivery
+dataset_version: capture_v001
+
+# facebookresearch/dinov3 をcloneしたディレクトリ（torch.hub の local ソース）
+repo_dir: ../third_party/dinov3
+# hubconf.py のエントリ名: dinov3_vits16 / vits16plus / vitb16 / vitl16 / vitl16plus / vith16plus / vit7b16
+model_name: dinov3_vitb16
+# Metaの配布ページから取得した重み。vitl16 はファイル名末尾の -<8桁hash>.pth を残す
+weights_path: ../weights/dinov3_vits16_pretrain_lvd1689m-08c60483.pth
+# 重みの事前学習データ。正規化統計の選択に使う（lvd1689m / sat493m）
+pretrain_dataset: lvd1689m
+
+device: null
+# 実測のready maskの最大寸法(581x577)を収め、patch size 16で割り切れる値
+crop_size: 640
+sqlite_timeout_seconds: 10.0

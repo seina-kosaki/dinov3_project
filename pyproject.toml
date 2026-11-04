@@ -1,0 +1,55 @@
+[project]
+name = "spd-dinov3-pipeline"
+version = "0.1.0"
+description = "承認済み器具のDINOv3特徴量とcropをCNN向けに出力する"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "numpy>=2.2.6",
+    "pillow>=11.0.0",
+    "pydantic-settings[yaml]>=2.16.2",
+    "termcolor>=3.3.0",
+    "torch>=2.7.0",
+    "torchmetrics>=1.9.0",
+    "torchvision",
+]
+
+[project.scripts]
+dinov3-pipeline = "dinov3_pipeline.entrypoints.deliver:main"
+
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }
+torchaudio = { index = "pytorch-cu128" }
+[dependency-groups]
+dev = [
+    "mypy>=1.15.0",
+    "poethepoet>=0.49.0",
+    "pytest>=8.3.0",
+    "ruff>=0.11.0",
+]
+
+[build-system]
+requires = ["setuptools>=75.0.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.poe.tasks]
+check = [
+  { cmd = "ruff check --fix --quiet --output-format concise" },
+  { cmd = "ruff format --quiet" },
+  { cmd = "mypy --config-file mypy.toml --no-error-summary src" },
+]

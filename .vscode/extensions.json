@@ -1,0 +1,26 @@
+{
+  "recommendations": [
+    /* 言語サポート・解析 */
+    "ms-python.python",              // Python 言語の基本サポート
+    "ms-python.vscode-pylance",      // 高速かつ高機能な言語サーバー (型補完)
+    "ms-python.debugpy",             // Python のデバッグ機能
+    "ms-python.mypy-type-checker",   // Mypy による厳格な静的型チェック
+    "charliermarsh.ruff",            // Ruff による高速な Lint/Format
+
+    /* AI アシスタント */
+    "github.copilot",                // AI によるコーディング補完
+    "github.copilot-chat",           // AI とのチャットによる対話的開発
+
+    /* 開発補助・自動化 */
+    "njpwerner.autodocstring",       // 関数の docstring を自動生成
+    "gruntfuggly.auto-snippet",      // 状況に応じたスニペットの自動挿入
+    "tamasfe.even-better-toml",      // pyproject.toml 等の編集サポート
+
+    /* 通信・インターフェース */
+    "drblury.protobuf-vsc",          // gRPC (Protocol Buffers) の構文強調
+
+    /* ワークフロー・多言語化 */
+    "adam-bender.commit-message-editor", // 規約に沿ったコミットメッセージの作成
+    "ms-ceintl.vscode-language-pack-ja"   // VS Code 本体の日本語化
+  ]
+}

@@ -52,7 +52,6 @@ from dinov3_pipeline.constants import (
     METADATA_DB,
     PCA_DIR,
     RGB_DIR,
-    RUNS_DIR,
     SAFE_NAME_PATTERN,
 )
 from dinov3_pipeline.domain.models import (
@@ -139,9 +138,7 @@ def export_delivery(
         for name in (RGB_DIR, DEPTH_DIR, MASK_DIR, FEATURE_DIR):
             (bundle / name).mkdir(parents=True)
 
-        result = _write_samples(
-            records, crop_size, dataset_version, bundle, debug, mask_depth
-        )
+        result = _write_samples(records, crop_size, dataset_version, bundle, debug, mask_depth)
         if not result.rows:
             raise DataContractError("CNN bundleへ出力できるcropがない")
         model_name, weights_sha256 = next(iter(models))
@@ -154,7 +151,7 @@ def export_delivery(
             mask_depth,
         )
         all_issues = [*issues, *result.issues]
-        _write_issues(debug / RUNS_DIR / dataset_version / ISSUES_FILE, all_issues)
+        _write_issues(debug / dataset_version / ISSUES_FILE, all_issues)
         _publish(staging, root, dataset_version, result.debug_dirs)
         return DeliveryOutput(
             destination,
@@ -201,9 +198,7 @@ def _write_samples(
             cropped = prepare_crop(sample, crop_size, mask_depth)
             data = np.load(artifact.path, allow_pickle=False)
             if data.dtype != np.dtype(FEATURE_DTYPE) or data.ndim != FEATURE_NDIM:
-                raise DataContractError(
-                    f"DINO特徴量は{FEATURE_DTYPE}の{FEATURE_LAYOUT} NPYでなければならない"
-                )
+                raise DataContractError(f"DINO特徴量は{FEATURE_DTYPE}の{FEATURE_LAYOUT} NPYでなければならない")
 
             cropped.rgb.save(bundle / rgb, format=IMAGE_FORMAT)
             cropped.mask.save(bundle / mask, format=IMAGE_FORMAT)
@@ -211,9 +206,7 @@ def _write_samples(
             shutil.copy2(artifact.path, bundle / feature)
 
             # PCAだけが失敗してもCNN向けデータは有効なため、理由を残して続行する
-            debug_dir = (
-                PurePosixPath(sample.capture_date) / sample.session_id / dataset_version
-            )
+            debug_dir = PurePosixPath(dataset_version) / sample.capture_date / sample.session_id
             try:
                 save_pca_visualization(
                     bundle / feature,
@@ -224,9 +217,7 @@ def _write_samples(
                 result.visualization_count += 1
                 result.debug_dirs.add(debug_dir)
             except DataContractError as error:
-                result.issues.append(
-                    f"{sample.session_id}/{sample.image_id}: PCA可視化: {error}"
-                )
+                result.issues.append(f"{sample.session_id}/{sample.image_id}: PCA可視化: {error}")
 
             result.rows.append(
                 (
@@ -243,9 +234,7 @@ def _write_samples(
             )
         except (DataContractError, OSError, ValueError) as error:
             # 1物体の失敗で他の物体の出力を止めないよう、理由を残して続行する
-            result.issues.append(
-                f"{sample.session_id}/{sample.image_id}: export: {error}"
-            )
+            result.issues.append(f"{sample.session_id}/{sample.image_id}: export: {error}")
     return result
 
 
@@ -305,9 +294,7 @@ def _write_issues(path: Path, issues: list[str]) -> None:
         writer.writerows((issue,) for issue in issues)
 
 
-def _publish(
-    staging: Path, root: Path, dataset_version: str, debug_dirs: set[PurePosixPath]
-) -> None:
+def _publish(staging: Path, root: Path, dataset_version: str, debug_dirs: set[PurePosixPath]) -> None:
     """完成した一時ディレクトリを、公開先へ移動する。
 
     Args:
@@ -320,10 +307,8 @@ def _publish(
         FileExistsError: debugの出力先が既に存在する場合。
     """
     debug_root = root / DEBUG_DIR
-    issues_relative = Path(RUNS_DIR) / dataset_version / ISSUES_FILE
-    moves = [
-        (staging / DEBUG_DIR / rel, debug_root / rel) for rel in sorted(debug_dirs)
-    ]
+    issues_relative = Path(dataset_version) / ISSUES_FILE
+    moves = [(staging / DEBUG_DIR / rel, debug_root / rel) for rel in sorted(debug_dirs)]
     moves.append((staging / DEBUG_DIR / issues_relative, debug_root / issues_relative))
     # 既存のdebug成果物を上書きしないよう、CNN bundleを動かす前に確認する
     for _, target in moves:

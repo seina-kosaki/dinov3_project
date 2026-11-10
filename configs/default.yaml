@@ -17,7 +17,7 @@ pretrain_dataset: lvd1689m
 # PyTorch device string（cuda:0 / cpuなど）。nullはCUDA利用可ならCUDA、それ以外CPUを自動選択
 device: null
 # RGB・depth・mask共通の正方形crop辺長（px）。実測ready maskの最大寸法(581x577)を収め、patch size 16で割り切れる値
-crop_size: 640
+crop_size: 672
 # true: depthのmask外を0にする / false: crop内のdepth生値をそのまま保存する
 mask_depth: false
 # 入力SQLiteのlock待機秒数（正数）

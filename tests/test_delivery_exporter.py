@@ -15,6 +15,8 @@
 
 from __future__ import annotations
 
+import csv
+import hashlib
 import sqlite3
 from contextlib import closing
 from dataclasses import dataclass, replace
@@ -31,6 +33,7 @@ from dinov3_pipeline.domain.models import (
     FeatureArtifact,
     ReadySample,
 )
+from dinov3_pipeline.infrastructure import delivery_exporter
 from dinov3_pipeline.infrastructure.delivery_exporter import export_delivery
 
 CROP_SIZE = 32
@@ -99,9 +102,7 @@ def _row(delivered: Delivered) -> tuple[str, ...]:
 
 
 @pytest.mark.parametrize("directory", ["rgb", "depth", "masks", "features"])
-def test_export_delivery_valid_sample_creates_asset_directory(
-    delivered: Delivered, directory: str
-) -> None:
+def test_export_delivery_valid_sample_creates_asset_directory(delivered: Delivered, directory: str) -> None:
     """CNN bundleに、各アセットのディレクトリを作る。"""
     # 準備・実行
     bundle = delivered.output.cnn_path
@@ -116,12 +117,7 @@ def test_export_delivery_valid_sample_writes_only_metadata_and_samples_tables(
     """CNN用SQLiteのテーブルを2つに絞る。"""
     # 準備・実行
     with sqlite3.connect(delivered.output.cnn_path / "metadata.sqlite3") as connection:
-        tables = {
-            row[0]
-            for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )
-        }
+        tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
 
     # 検証
     assert tables == {"dataset_metadata", "samples"}
@@ -140,25 +136,27 @@ def test_export_delivery_valid_sample_writes_minimal_sample_columns(
 
 
 @pytest.mark.parametrize("table", ["dataset_metadata", "samples"])
-def test_export_delivery_schema_types_nullability_and_primary_keys(
-    delivered: Delivered, table: str
-) -> None:
+def test_export_delivery_schema_types_nullability_and_primary_keys(delivered: Delivered, table: str) -> None:
     """出力値の必須性と、PRAGMAが示すDDL制約を区別して検証する。"""
     names = (
         ["key", "value"]
         if table == "dataset_metadata"
         else [
-            "sample_id", "instrument_uid", "session_id", "image_id", "capture_date",
-            "rgb_path", "depth_path", "mask_path", "feature_path",
+            "sample_id",
+            "instrument_uid",
+            "session_id",
+            "image_id",
+            "capture_date",
+            "rgb_path",
+            "depth_path",
+            "mask_path",
+            "feature_path",
         ]
     )
     with sqlite3.connect(delivered.output.cnn_path / "metadata.sqlite3") as connection:
         columns = list(connection.execute(f"PRAGMA table_info({table})"))
         rows = list(connection.execute(f"SELECT * FROM {table}"))  # noqa: S608 - tableは固定のテストパラメータ
-        assert [(row[1], row[2], row[3], row[4], row[5]) for row in columns] == [
-            (name, "TEXT", int(index != 0), None, int(index == 0))
-            for index, name in enumerate(names)
-        ]
+        assert [(row[1], row[2], row[3], row[4], row[5]) for row in columns] == [(name, "TEXT", int(index != 0), None, int(index == 0)) for index, name in enumerate(names)]
         assert rows
         assert all(isinstance(value, str) for row in rows for value in row)
         # TEXT PRIMARY KEYだけではNULLを拒否しない（確認後はrollbackする）。
@@ -205,15 +203,11 @@ def test_export_delivery_valid_sample_keeps_float_depth_crop(
     # 検証
     with Image.open(depth_path) as depth:
         assert depth.mode == "F"
-        assert depth.getpixel((CROP_SIZE // 2, CROP_SIZE // 2)) == pytest.approx(
-            DEPTH_VALUE
-        )
+        assert depth.getpixel((CROP_SIZE // 2, CROP_SIZE // 2)) == pytest.approx(DEPTH_VALUE)
 
 
 @pytest.mark.parametrize("mask_depth", [False, True])
-def test_export_delivery_depth_background_matches_selected_mask_setting(
-    make_sample: SampleFactory, tmp_path: Path, mask_depth: bool
-) -> None:
+def test_export_delivery_depth_background_matches_selected_mask_setting(make_sample: SampleFactory, tmp_path: Path, mask_depth: bool) -> None:
     """depth背景とmetadataがmask_depthの選択に一致する。"""
     # 準備
     sample = make_sample(size=64, mask_box=(24, 24, 40, 40))
@@ -237,13 +231,9 @@ def test_export_delivery_depth_background_matches_selected_mask_setting(
     with Image.open(output.cnn_path / row[6]) as depth:
         assert depth.mode == "F"
         assert depth.getpixel((0, 0)) == pytest.approx(0 if mask_depth else 2.5)
-        assert depth.getpixel((CROP_SIZE // 2, CROP_SIZE // 2)) == pytest.approx(
-            DEPTH_VALUE
-        )
+        assert depth.getpixel((CROP_SIZE // 2, CROP_SIZE // 2)) == pytest.approx(DEPTH_VALUE)
     with sqlite3.connect(output.cnn_path / "metadata.sqlite3") as connection:
-        metadata = dict(
-            connection.execute("SELECT key, value FROM dataset_metadata").fetchall()
-        )
+        metadata = dict(connection.execute("SELECT key, value FROM dataset_metadata").fetchall())
     assert metadata["mask_depth"] == str(mask_depth).lower()
     with Image.open(output.cnn_path / row[5]) as rgb:
         assert rgb.getpixel((0, 0)) == (0, 0, 0)
@@ -257,28 +247,25 @@ def test_export_delivery_valid_sample_copies_feature_npy_unchanged(
     copied = np.load(delivered.output.cnn_path / _row(delivered)[8], allow_pickle=False)
 
     # 検証
-    np.testing.assert_array_equal(
-        copied, np.load(delivered.artifact.path, allow_pickle=False)
-    )
+    np.testing.assert_array_equal(copied, np.load(delivered.artifact.path, allow_pickle=False))
 
 
 def test_export_delivery_valid_sample_writes_pca_under_date_and_session(
     delivered: Delivered,
 ) -> None:
-    """PCA画像を debug/<日付>/<session>/<version>/pca_rgb に保存する。"""
+    """PCA画像を debug/<version>/<日付>/<session>/pca_rgb に保存する。"""
     # 準備・実行
-    pca_dir = (
-        delivered.output.debug_path / "2026-10-30" / "session-001" / VERSION / "pca_rgb"
-    )
+    pca_dir = delivered.output.debug_path / VERSION / "2026-10-30" / "session-001" / "pca_rgb"
 
     # 検証
-    assert len(list(pca_dir.glob("*.png"))) == 1
+    key = hashlib.sha256(delivered.sample.sample_id.encode("utf-8")).hexdigest()
+    assert [path.name for path in pca_dir.glob("*.png")] == [f"{key}.png"]
 
 
 def test_export_delivery_valid_sample_writes_issues_csv(delivered: Delivered) -> None:
-    """除外理由のCSVを debug/runs に保存する。"""
+    """除外理由のCSVを debug/<version> に保存する。"""
     # 準備・実行
-    issues = delivered.output.debug_path / "runs" / VERSION / "issues.csv"
+    issues = delivered.output.debug_path / VERSION / "issues.csv"
 
     # 検証
     assert issues.is_file()
@@ -299,9 +286,7 @@ def test_export_delivery_existing_version_raises_file_exists_error(
         )
 
 
-def test_export_delivery_mixed_weights_raises_contract_error(
-    make_sample: SampleFactory, tmp_path: Path
-) -> None:
+def test_export_delivery_mixed_weights_raises_contract_error(make_sample: SampleFactory, tmp_path: Path) -> None:
     """異なる重みの特徴量を1つのbundleに混ぜない。"""
     # 準備
     sample = make_sample(size=64, mask_box=(16, 16, 48, 48))
@@ -316,9 +301,7 @@ def test_export_delivery_mixed_weights_raises_contract_error(
 
 
 @pytest.mark.parametrize("version", ["../escape", "", "bad version"])
-def test_export_delivery_unsafe_version_raises_contract_error(
-    make_sample: SampleFactory, tmp_path: Path, version: str
-) -> None:
+def test_export_delivery_unsafe_version_raises_contract_error(make_sample: SampleFactory, tmp_path: Path, version: str) -> None:
     """ディレクトリ名として安全でないversionを拒否する。"""
     # 準備
     sample = make_sample(size=64, mask_box=(16, 16, 48, 48))
@@ -349,12 +332,15 @@ def test_export_delivery_oversized_sample_is_excluded_with_diagnostics(
     oversized = replace(valid, sample_id="oversized", mask_path=oversized_mask)
     artifact = _artifact(tmp_path)
     output = export_delivery(
-        tmp_path / "delivery", CROP_SIZE, VERSION,
-        [(oversized, artifact), (valid, artifact)], [],
+        tmp_path / "delivery",
+        CROP_SIZE,
+        VERSION,
+        [(oversized, artifact), (valid, artifact)],
+        [],
     )
     assert output.exported_count == 1
     assert output.issue_count == 1
-    issues = (output.debug_path / "runs" / VERSION / "issues.csv").read_text(encoding="utf-8-sig")
+    issues = (output.debug_path / VERSION / "issues.csv").read_text(encoding="utf-8-sig")
     assert issues.count("対象maskが設定crop_sizeに収まらない") == 1
     assert "oversized, crop_size=32, foreground_width=64, foreground_height=16" in issues
     assert capsys.readouterr() == ("", "")
@@ -373,8 +359,8 @@ def test_export_delivery_publication_order_and_failure_state(
     artifact = _artifact(tmp_path)
     root = tmp_path / "delivery"
     cnn = root / "cnn" / VERSION
-    debug = root / "debug" / sample.capture_date / sample.session_id / VERSION
-    issues = root / "debug" / "runs" / VERSION / "issues.csv"
+    debug = root / "debug" / VERSION / sample.capture_date / sample.session_id
+    issues = root / "debug" / VERSION / "issues.csv"
     original_replace = Path.replace
     observed = []
 
@@ -401,23 +387,19 @@ def test_export_delivery_publication_order_and_failure_state(
         with pytest.raises(OSError, match="publish failed"):
             export_delivery(root, CROP_SIZE, VERSION, [(sample, artifact)], [])
     expected_order = ["cnn", "debug", "issues"]
-    assert observed == (
-        expected_order if failure_at == "none"
-        else expected_order[:expected_order.index(failure_at) + 1]
-    )
+    assert observed == (expected_order if failure_at == "none" else expected_order[: expected_order.index(failure_at) + 1])
     assert cnn.exists() == (failure_at != "cnn")
     assert debug.exists() == (failure_at in {"none", "issues"})
     assert issues.exists() == (failure_at == "none")
     assert not list(root.glob(f".{VERSION}-*"))
 
 
-def test_export_delivery_existing_debug_prevents_cnn_publication(
-    make_sample: SampleFactory, tmp_path: Path
-) -> None:
+@pytest.mark.parametrize("relative", ["issues.csv", "2026-10-30/session-001/pca_rgb/keep.png"])
+def test_export_delivery_existing_debug_prevents_cnn_publication(make_sample: SampleFactory, tmp_path: Path, relative: str) -> None:
     """debugの衝突はCNNの移動前に検出し、既存ファイルを維持する。"""
-    sample = make_sample()
+    sample = make_sample(mask_box=(16, 16, 48, 48))
     root = tmp_path / "delivery"
-    issues = root / "debug" / "runs" / VERSION / "issues.csv"
+    issues = root / "debug" / VERSION / relative
     issues.parent.mkdir(parents=True)
     issues.write_text("existing", encoding="utf-8")
     with pytest.raises(FileExistsError, match="debug出力"):
@@ -425,3 +407,61 @@ def test_export_delivery_existing_debug_prevents_cnn_publication(
     assert not (root / "cnn" / VERSION).exists()
     assert issues.read_text(encoding="utf-8") == "existing"
     assert not list(root.glob(f".{VERSION}-*"))
+
+
+def test_export_delivery_pca_failure_keeps_cnn_and_records_issues(make_sample: SampleFactory, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    sample = make_sample()
+    artifact = _artifact(tmp_path)
+
+    def fail(*args: object) -> None:
+        raise DataContractError("PCA failed")
+
+    monkeypatch.setattr(delivery_exporter, "save_pca_visualization", fail)
+    output = export_delivery(tmp_path / "delivery", CROP_SIZE, VERSION, [(sample, artifact)], ["input issue"])
+    assert output.exported_count == 1
+    assert output.visualization_count == 0
+    assert output.issue_count == 2
+    with (output.debug_path / VERSION / "issues.csv").open(encoding="utf-8-sig", newline="") as stream:
+        assert list(csv.reader(stream)) == [["reason"], ["input issue"], ["session-001/image-001: PCA可視化: PCA failed"]]
+    assert not list(output.debug_path.rglob("*.png"))
+    copied = next((output.cnn_path / "features").glob("*.npy"))
+    assert copied.read_bytes() == artifact.path.read_bytes()
+
+
+def test_export_delivery_multiple_dates_and_sessions_publish_in_sorted_order(make_sample: SampleFactory, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    sample = make_sample(mask_box=(16, 16, 48, 48))
+    samples = [
+        replace(sample, sample_id="third", capture_date="2026-10-31", session_id="session-002"),
+        replace(sample, sample_id="second", session_id="session-002"),
+        sample,
+    ]
+    artifact = _artifact(tmp_path)
+    root = tmp_path / "delivery"
+    legacy = root / "debug" / "2026-10-29" / "session-001" / "capture_v000" / "pca_rgb" / "keep.png"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_bytes(b"unchanged")
+    original_replace = Path.replace
+    observed = []
+
+    def observe_replace(source: Path, target: Path) -> Path:
+        observed.append(target)
+        return original_replace(source, target)
+
+    monkeypatch.setattr(Path, "replace", observe_replace)
+    output = export_delivery(root, CROP_SIZE, VERSION, [(item, artifact) for item in samples], [])
+    debug_dirs = sorted({root / "debug" / VERSION / item.capture_date / item.session_id for item in samples})
+    assert observed == [output.cnn_path, *debug_dirs, root / "debug" / VERSION / "issues.csv"]
+    assert output.exported_count == output.visualization_count == 3
+    for item in samples:
+        key = hashlib.sha256(item.sample_id.encode("utf-8")).hexdigest()
+        pca = root / "debug" / VERSION / item.capture_date / item.session_id / "pca_rgb" / f"{key}.png"
+        expected = tmp_path / f"expected-{key}.png"
+        delivery_exporter.save_pca_visualization(
+            output.cnn_path / "features" / f"{key}.npy",
+            output.cnn_path / "rgb" / f"{key}.png",
+            output.cnn_path / "masks" / f"{key}.png",
+            expected,
+        )
+        assert pca.read_bytes() == expected.read_bytes()
+    assert legacy.read_bytes() == b"unchanged"
+    assert not (root / "debug" / "runs").exists()

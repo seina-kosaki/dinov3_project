@@ -21,14 +21,14 @@ def test_empty_root_and_repeated_reservations(tmp_path: Path) -> None:
     "relative",
     [
         "cnn/capture_v007",
+        "debug/capture_v007/2026-10-30/session-001/pca_rgb",
+        "debug/capture_v007",
         "debug/runs/capture_v007",
         "debug/2026-10-30/session-001/capture_v007",
         ".dataset_versions/capture_v007",
     ],
 )
-def test_uses_maximum_across_outputs_and_reservations(
-    tmp_path: Path, relative: str
-) -> None:
+def test_uses_maximum_across_outputs_and_reservations(tmp_path: Path, relative: str) -> None:
     existing = tmp_path / relative
     existing.mkdir(parents=True)
     sentinel = existing / "keep.txt"
@@ -62,20 +62,51 @@ def test_explicit_version_is_reserved_and_never_reused(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     "relative",
-    ["cnn", "debug/runs", "debug/2026-10-30/session-001"],
+    ["cnn", "debug", "debug/runs", "debug/2026-10-30/session-001"],
 )
-def test_explicit_version_rejects_any_existing_output(
-    tmp_path: Path, relative: str
-) -> None:
+def test_explicit_version_rejects_any_existing_output(tmp_path: Path, relative: str) -> None:
     (tmp_path / relative / "legacy").mkdir(parents=True)
     with pytest.raises(FileExistsError):
         reserve_dataset_version(tmp_path, "legacy")
 
 
+@pytest.mark.parametrize("remaining", ["pca", "issues", "file"])
+@pytest.mark.parametrize("version", ["capture_v007", "legacy"])
+def test_new_debug_only_rejects_explicit_version(tmp_path: Path, remaining: str, version: str) -> None:
+    existing = tmp_path / "debug" / version
+    if remaining == "pca":
+        existing = existing / "2026-10-30" / "session-001" / "pca_rgb" / "sample.png"
+    elif remaining == "issues":
+        existing = existing / "issues.csv"
+    existing.parent.mkdir(parents=True)
+    existing.write_bytes(b"unchanged")
+    with pytest.raises(FileExistsError):
+        reserve_dataset_version(tmp_path, version)
+    assert reserve_dataset_version(tmp_path) == ("capture_v008" if version == "capture_v007" else "capture_v001")
+    assert existing.read_bytes() == b"unchanged"
+
+
+def test_new_debug_date_and_session_are_not_versions(tmp_path: Path) -> None:
+    existing = tmp_path / "debug" / "legacy" / "2026-10-30" / "capture_v999" / "pca_rgb"
+    existing.mkdir(parents=True)
+    assert reserve_dataset_version(tmp_path) == "capture_v001"
+    assert reserve_dataset_version(tmp_path, "capture_v999") == "capture_v999"
+    assert reserve_dataset_version(tmp_path, "2026-10-30") == "2026-10-30"
+
+
+@pytest.mark.parametrize("relative", ["debug/runs/capture_v007", "debug/2026-10-30/session-001/capture_v007"])
+def test_legacy_numbered_file_is_protected(tmp_path: Path, relative: str) -> None:
+    existing = tmp_path / relative
+    existing.parent.mkdir(parents=True)
+    existing.write_bytes(b"unchanged")
+    assert reserve_dataset_version(tmp_path) == "capture_v008"
+    with pytest.raises(FileExistsError):
+        reserve_dataset_version(tmp_path, "capture_v007")
+    assert existing.read_bytes() == b"unchanged"
+
+
 @pytest.mark.parametrize("version", ["../escape", "", "/absolute", "a/b"])
-def test_invalid_explicit_version_does_not_create_root(
-    tmp_path: Path, version: str
-) -> None:
+def test_invalid_explicit_version_does_not_create_root(tmp_path: Path, version: str) -> None:
     root = tmp_path / "delivery"
     with pytest.raises(ValueError):
         reserve_dataset_version(root, version)

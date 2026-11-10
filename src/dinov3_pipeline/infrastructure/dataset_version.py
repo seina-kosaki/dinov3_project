@@ -19,17 +19,12 @@ def _output_versions(root: Path) -> set[str]:
     """CNN・実行issue・session別debugのいずれかに残るversion名を集める。"""
     versions = {path.name for path in (root / CNN_DIR).glob("*")}
     versions.update(path.name for path in (root / DEBUG_DIR / RUNS_DIR).glob("*"))
-    versions.update(
-        path.name
-        for path in (root / DEBUG_DIR).glob("*/*/*")
-        if path.parents[1].name != RUNS_DIR
-    )
+    versions.update(path.name for path in (root / DEBUG_DIR).glob("*") if path.name != RUNS_DIR)
+    versions.update(path.name for path in (root / DEBUG_DIR).glob("[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/*/*"))
     return versions
 
 
-def reserve_dataset_version(
-    delivery_root: Path, dataset_version: str | None = None
-) -> str:
+def reserve_dataset_version(delivery_root: Path, dataset_version: str | None = None) -> str:
     """未使用のversionを予約し、その名前を返す。
 
     Args:
@@ -48,9 +43,7 @@ def reserve_dataset_version(
         予約記録は成功・失敗を問わず残す。予約済み番号は欠番でも再利用しない。
         自動採番の予約競合時は既存番号を読み直し、別の番号を予約する。
     """
-    if dataset_version is not None and re.fullmatch(
-        SAFE_NAME_PATTERN, dataset_version
-    ) is None:
+    if dataset_version is not None and re.fullmatch(SAFE_NAME_PATTERN, dataset_version) is None:
         raise ValueError("dataset_versionは安全なディレクトリ名で指定する必要がある")
 
     root = Path(delivery_root).resolve()
@@ -60,11 +53,7 @@ def reserve_dataset_version(
         used = _output_versions(root)
         used.update(path.name for path in reservations.iterdir())
         if dataset_version is None:
-            numbers = [
-                int(match.group(1))
-                for name in used
-                if (match := AUTO_VERSION_PATTERN.fullmatch(name)) is not None
-            ]
+            numbers = [int(match.group(1)) for name in used if (match := AUTO_VERSION_PATTERN.fullmatch(name)) is not None]
             version = f"capture_v{max(numbers, default=0) + 1:03d}"
         else:
             version = dataset_version

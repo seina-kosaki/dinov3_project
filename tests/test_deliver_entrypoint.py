@@ -7,8 +7,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from dinov3_pipeline.entrypoints import deliver
 from dinov3_pipeline.domain.models import FeatureArtifact
+from dinov3_pipeline.entrypoints import deliver
 from dinov3_pipeline.infrastructure import delivery_exporter
 from dinov3_pipeline.settings import load_settings
 
@@ -19,9 +19,7 @@ class ArrayExtractor:
 
     def extract(self, sample: object, destination: Path) -> FeatureArtifact:
         np.save(destination, np.arange(16, dtype=np.float32).reshape(2, 2, 4))
-        return FeatureArtifact(
-            destination, (2, 2, 4), "float32", "dinov3_test", "weights-1"
-        )
+        return FeatureArtifact(destination, (2, 2, 4), "float32", "dinov3_test", "weights-1")
 
 
 @pytest.fixture
@@ -47,20 +45,14 @@ def _assert_version_outputs(root: Path, version: str) -> None:
         metadata = dict(connection.execute("SELECT key, value FROM dataset_metadata"))
     assert metadata["dataset_version"] == version
     assert metadata["mask_depth"] == "false"
-    assert (root / "debug" / "runs" / version / "issues.csv").is_file()
-    assert len(list((root / "debug").glob(f"*/*/{version}/pca_rgb/*.png"))) == 1
+    assert (root / "debug" / version / "issues.csv").is_file()
+    assert len(list((root / "debug" / version).glob("*/*/pca_rgb/*.png"))) == 1
 
 
-def test_main_repeated_runs_use_same_version_everywhere_without_overwriting(
-    delivery_root: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_main_repeated_runs_use_same_version_everywhere_without_overwriting(delivery_root: Path, caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.INFO, logger=deliver.__name__)
     assert deliver.main() == 0
-    first_files = {
-        path: path.read_bytes()
-        for path in delivery_root.rglob("*")
-        if path.is_file()
-    }
+    first_files = {path: path.read_bytes() for path in delivery_root.rglob("*") if path.is_file()}
     assert deliver.main() == 0
     for version in ("capture_v001", "capture_v002"):
         _assert_version_outputs(delivery_root, version)
@@ -68,9 +60,7 @@ def test_main_repeated_runs_use_same_version_everywhere_without_overwriting(
     assert all(path.read_bytes() == data for path, data in first_files.items())
 
 
-def test_main_model_failure_consumes_version_without_publishing(
-    delivery_root: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_main_model_failure_consumes_version_without_publishing(delivery_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     def fail(*args: object) -> None:
         raise RuntimeError("model failed")
 
@@ -83,9 +73,7 @@ def test_main_model_failure_consumes_version_without_publishing(
     _assert_version_outputs(delivery_root, "capture_v002")
 
 
-def test_main_export_failure_never_publishes_incomplete_cnn(
-    delivery_root: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_main_export_failure_never_publishes_incomplete_cnn(delivery_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     def fail(*args: object) -> None:
         raise RuntimeError("database write failed")
 
@@ -115,9 +103,7 @@ def test_main_no_inputs_does_not_reserve_or_load_model(
     assert not delivery_root.exists()
 
 
-def test_main_explicit_version_is_preserved_and_duplicate_rejected_before_model(
-    delivery_root: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_main_explicit_version_is_preserved_and_duplicate_rejected_before_model(delivery_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     settings = deliver.load_settings().model_copy(update={"dataset_version": "legacy"})
     monkeypatch.setattr(deliver, "load_settings", lambda: settings)
     assert deliver.main() == 0
@@ -129,3 +115,39 @@ def test_main_explicit_version_is_preserved_and_duplicate_rejected_before_model(
     monkeypatch.setattr(deliver, "Dinov3FeatureExtractor", unexpected)
     assert deliver.main() == 2
     _assert_version_outputs(delivery_root, "legacy")
+
+
+@pytest.mark.parametrize(
+    "relative",
+    [
+        "debug/{version}/2026-10-30/session-001/pca_rgb/sample.png",
+        "debug/{version}/issues.csv",
+        "debug/2026-10-30/session-001/{version}/pca_rgb/sample.png",
+        "debug/runs/{version}/issues.csv",
+    ],
+)
+@pytest.mark.parametrize("explicit", [False, True])
+def test_main_protects_debug_only_versions(
+    delivery_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    relative: str,
+    explicit: bool,
+) -> None:
+    version = "legacy" if explicit else "capture_v007"
+    existing = delivery_root / relative.format(version=version)
+    existing.parent.mkdir(parents=True)
+    existing.write_bytes(b"unchanged")
+    if explicit:
+        settings = deliver.load_settings().model_copy(update={"dataset_version": version})
+        monkeypatch.setattr(deliver, "load_settings", lambda: settings)
+
+        def unexpected(*args: object) -> None:
+            pytest.fail("使用済みdebug versionでモデルを読み込んだ")
+
+        monkeypatch.setattr(deliver, "Dinov3FeatureExtractor", unexpected)
+        assert deliver.main() == 2
+        assert not (delivery_root / "cnn").exists()
+    else:
+        assert deliver.main() == 0
+        _assert_version_outputs(delivery_root, "capture_v008")
+    assert existing.read_bytes() == b"unchanged"

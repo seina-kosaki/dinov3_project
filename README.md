@@ -65,10 +65,12 @@ dinov3_delivery/
     depth/     # 元値・float32 modeを保つTIFF crop
     masks/     # 二値PNG crop
     features/  # DINOv3 float32 HWC NPY
-  debug/<日付>/<session_id>/<dataset_version>/pca_rgb/
+  debug/<dataset_version>/<日付>/<session_id>/pca_rgb/
     <sample>.png  # crop RGBとPCA-RGB特徴量の比較
-  debug/runs/<dataset_version>/issues.csv
+  debug/<dataset_version>/issues.csv
 ```
+
+新規出力は上記のcapture単位の配置を使う。capture_IDは既存の`dataset_version`を指す。既存出力は移動・上書きせず、採番・重複検出は新旧両階層を参照する。詳細は[受け渡し仕様のDebug節](docs/cnn_delivery_handoff.md#debug)を参照する。
 
 RGB・depth・maskはmaskのforeground boundsを含む同じcrop座標で切り出し、resize/paddingは行わない。RGBはmask外を0にする。depthは通常実行の既定`mask_depth: false`ではcrop内のmask外も元値を保ち、`true`時だけmask外を0にする。元ファイルは変更しない。depthはDINOv3へは入力せず、CNN用cropとして保存する。特徴量NPYは`float32`の`(Hpatch, Wpatch, C)`である。
 

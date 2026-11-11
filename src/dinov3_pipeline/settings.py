@@ -28,10 +28,11 @@ from pydantic_settings import (
     YamlConfigSettingsSource,
 )
 
-from dinov3_pipeline.constants import (
+from dinov3_pipeline.common.constants import (
     CONFIG_DIR,
     DEFAULT_CONFIG_PATH,
     ENV_PREFIX,
+    LEGACY_MODEL_ALIASES,
     PRETRAIN_NORMALIZATION,
     SAFE_NAME_PATTERN,
     SUPPORTED_MODEL_NAMES,
@@ -94,8 +95,8 @@ class Settings(BaseSettings):
         Raises:
             ValueError: 未対応のモデル名の場合。
         """
-        # タイプミスをモデル読込前に検出する（ConvNeXtはpatch tokenを持たないため対象外）
-        if value not in SUPPORTED_MODEL_NAMES:
+        canonical = LEGACY_MODEL_ALIASES.get(value, value)
+        if value not in SUPPORTED_MODEL_NAMES and canonical not in SUPPORTED_MODEL_NAMES:
             raise ValueError(
                 f"model_nameは{SUPPORTED_MODEL_NAMES}のいずれかである必要がある: {value}"
             )

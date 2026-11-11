@@ -5,11 +5,12 @@ data_root: ../../shared_data
 delivery_root: ../../dinov3_delivery
 # dataset_version省略時はcapture_v001から連番で自動採番する。明示指定は未使用名のみ可。
 
-# facebookresearch/dinov3 をcloneしたディレクトリ（torch.hub の local ソース）
+# 変更後の既定値は Hugging Face model ID。clone / torch.hub 由来の旧設定は使わない。
 repo_dir: ../third_party/dinov3
-# hubconf.py のエントリ名: dinov3_vits16 / vits16plus / vitb16 / vitl16 / vitl16plus / vith16plus / vit7b16
-model_name: dinov3_vits16
-# Metaの配布ページから取得した重み。vitl16 はファイル名末尾の -<8桁hash>.pth を残す
+# 公式のモデルID: facebook/dinov3-vits16-pretrain-lvd1689m / ... / facebook/dinov3-vit7b16-pretrain-lvd1689m
+# 期待hidden size: 384 / 384 / 768 / 1024 / 1280 / 4096
+model_name: facebook/dinov3-vits16-pretrain-lvd1689m
+# 旧来の重みパスは未使用。Transformers/Hugging Face Hubの標準キャッシュ/認証を使用する。
 weights_path: ../weights/dinov3_vits16_pretrain_lvd1689m-08c60483.pth
 # 重みの事前学習データ。正規化統計の選択に使う（lvd1689m / sat493m）
 pretrain_dataset: lvd1689m

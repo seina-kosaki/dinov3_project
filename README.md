@@ -6,30 +6,24 @@
 
 ## セットアップ
 
-Python 3.12と`uv`を使用する。DINOv3のコードと重みにはMetaのDINOv3 Licenseが適用される。Hugging Faceは使わず、Metaが配布する重みを`torch.hub`のローカルソースで読み込む。
+Python 3.12と`uv`を使用する。DINOv3はTransformers/Hugging Faceから読み込む。モデルID、責務別の`src/`構成、および既存の入出力契約からの許可済み差分は[移行仕様](docs/huggingface_transformers_refactor.md)を参照する。
 
 ```powershell
 uv sync
 ```
 
-次の2つを用意する（どちらもGit管理外）。
+モデルIDは`configs/default.yaml`の`model_name`で切り替える。既定は`facebook/dinov3-vits16-pretrain-lvd1689m`で、選択可能なモデルは次の6つである。初回取得・キャッシュ・認証はHugging Face Hubの標準的な仕組みに従い、認証情報をリポジトリへ保存しない。
 
-1. 公式リポジトリをcloneする。`repo_dir`の既定値は`third_party/dinov3`である。
-   ```powershell
-   git clone https://github.com/facebookresearch/dinov3 third_party/dinov3
-   ```
-2. [Metaの配布ページ](https://ai.meta.com/resources/models-and-libraries/dinov3-downloads/)でアクセスを申請し、メールのURLから重み（`.pth`）を`wget`で`weights/`へ取得する（ブラウザでは取得しない）。`dinov3_vitl16`はファイル名末尾の`-<8桁hash>.pth`を残す。
+| Hugging Face model ID | hidden size |
+|---|---:|
+| `facebook/dinov3-vits16-pretrain-lvd1689m` | 384 |
+| `facebook/dinov3-vits16plus-pretrain-lvd1689m` | 384 |
+| `facebook/dinov3-vitb16-pretrain-lvd1689m` | 768 |
+| `facebook/dinov3-vitl16-pretrain-lvd1689m` | 1024 |
+| `facebook/dinov3-vith16plus-pretrain-lvd1689m` | 1280 |
+| `facebook/dinov3-vit7b16-pretrain-lvd1689m` | 4096 |
 
-モデルは`configs/default.yaml`で切り替える。
-
-| 項目 | 内容 |
-|---|---|
-| `repo_dir` | cloneした公式リポジトリ |
-| `model_name` | `dinov3_vits16` / `dinov3_vits16plus` / `dinov3_vitb16` / `dinov3_vitl16` / `dinov3_vitl16plus` / `dinov3_vith16plus` / `dinov3_vit7b16` |
-| `weights_path` | 上記モデルの重みファイル |
-| `pretrain_dataset` | 重みの事前学習データ。`lvd1689m`（Web画像）または`sat493m`（衛星画像）。正規化統計を選ぶ |
-
-`model_name`と`weights_path`、`pretrain_dataset`は必ず同じモデルの組で指定する。ConvNeXt系はpatch tokenを持たないため対象外である。出力のメタデータには、モデル名と重みファイルのSHA-256を記録する。PyTorchが対応デバイスを検出するとCUDAで実行し、それ以外の場合はCPUで実行する。デバイスを明示する場合は、`device`に`cuda:0`や`cpu`などのPyTorch device stringを設定する。
+6モデルはいずれもpatch size 16である。ConvNeXt系は対象外。PyTorchが対応デバイスを検出するとCUDAで実行し、それ以外の場合はCPUで実行する。デバイスを明示する場合は、`device`に`cuda:0`や`cpu`などのPyTorch device stringを設定する。
 
 推論前にPyTorchのCUDA利用可否を確認できる。
 
@@ -37,11 +31,11 @@ uv sync
 uv run python -c "import torch; print('PyTorch:', torch.__version__); print('CUDA available:', torch.cuda.is_available()); print('CUDA runtime:', torch.version.cuda)"
 ```
 
-`CUDA available`が`False`でもCPU推論は実行できる。重みはローカルファイルから読むため、推論時のネットワーク接続は不要である。
+`CUDA available`が`False`でもCPU推論は実行できる。モデルの取得・キャッシュにはHugging Face Hubの標準動作が適用される。
 
 ## 実行手順
 
-重みと公式リポジトリを用意し、`configs/default.yaml`を設定してから、承認済みデータの抽出と送付物生成を一度に実行する。
+`configs/default.yaml`を設定してから、承認済みデータの抽出と送付物生成を一度に実行する。
 
 ```powershell
 uv run python src/dinov3_pipeline/entrypoints/deliver.py
@@ -51,7 +45,7 @@ uv run python src/dinov3_pipeline/entrypoints/deliver.py
 
 通常の入力は`shared_data/<日付>/<session_id>/metadata.sqlite3`である。全session DBを読み取り専用で走査し、`sam3_dino_results.is_dino_ready=1`のみを対象にする。抽出前後に承認状態と原本hashを再確認する。
 
-使用モデルは`configs/default.yaml`の`model_name`・`weights_path`・`pretrain_dataset`で指定する。`crop_size`は固定正方形cropの辺長で、DINOv3のpatch sizeで割り切れる必要がある。既定値640は、確認済みready maskの最大581×577を収める値である。対象maskが指定cropを超えるサンプルは縮小せず、debug issueへ記録して除外する。
+使用モデルは`configs/default.yaml`の`model_name`で指定する。`crop_size`は固定正方形cropの辺長で、DINOv3のpatch sizeで割り切れる必要がある。既定値672は、確認済みready maskの最大581×577を収める値である。対象maskが指定cropを超えるサンプルは縮小せず、debug issueへ記録して除外する。
 
 ## 出力仕様
 
@@ -74,7 +68,7 @@ dinov3_delivery/
 
 RGB・depth・maskはmaskのforeground boundsを含む同じcrop座標で切り出し、resize/paddingは行わない。RGBはmask外を0にする。depthは通常実行の既定`mask_depth: false`ではcrop内のmask外も元値を保ち、`true`時だけmask外を0にする。元ファイルは変更しない。depthはDINOv3へは入力せず、CNN用cropとして保存する。特徴量NPYは`float32`の`(Hpatch, Wpatch, C)`である。
 
-CNN用SQLiteは`dataset_metadata`と`samples`の2テーブルだけである。sample行には`sample_id`、`instrument_uid`、`session_id`、`image_id`、`capture_date`と、RGB/depth/mask/featureのbundle相対pathを保存する。モデル名、重みのSHA-256、cropサイズ、特徴量layoutはdataset単位のmetadataにまとめる。出力versionは上書きしない。
+CNN用SQLiteは`dataset_metadata`と`samples`の2テーブルだけである。sample行には`sample_id`、`instrument_uid`、`session_id`、`image_id`、`capture_date`と、RGB/depth/mask/featureのbundle相対pathを保存する。モデル名、cropサイズ、特徴量layout等はdataset単位のmetadataにまとめる。既存契約からの許可済み差分として`dataset_metadata`の`weights_sha256` keyは出力しないが、SQLiteのテーブル・列構造は維持する。詳細は[CNN出力契約](docs/contracts/cnn_delivery.md#合意済みの契約差分)を参照する。出力versionは上書きしない。
 
 ## 補足
 

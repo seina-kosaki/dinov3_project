@@ -52,7 +52,7 @@ C:\work\SPD\dinov3_delivery\cnn\<dataset_version>/
 
 ### 実装方針・受け入れ条件
 
-変更対象の責務は`infrastructure/delivery_exporter.py`のPCA・issues出力先と公開先の整合、および`infrastructure/dataset_version.py`の使用済みversion探索である。versionの命名・予約方式は変えず、探索の詳細は[自動採番仕様](dataset_version_autonumbering.md)に従う。
+変更対象の責務は`src/dinov3_pipeline/saving/delivery_exporter.py`のPCA・issues出力先と公開先の整合、および`src/dinov3_pipeline/saving/dataset_version.py`の使用済みversion探索である。versionの命名・予約方式は変えず、探索の詳細は[自動採番仕様](dataset_version_autonumbering.md)に従う。
 
 1. 新規PCA画像が`debug/<dataset_version>/<日付>/<session_id>/pca_rgb/<既存PNG名>`に出力される。複数日付・sessionも同じversion配下にまとまる。
 2. 実行issues.csvが`debug/<dataset_version>/issues.csv`に保存される。PCA失敗理由の記録とCNN特徴量の維持も確認する。

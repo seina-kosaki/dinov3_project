@@ -2,7 +2,11 @@
 
 ## 目的・適用範囲
 
-DINOv3側が生成しCNN側へ渡す自己完結bundleの出力契約を定める。根拠は`src/dinov3_pipeline/infrastructure/delivery_exporter.py`の`SCHEMA`、`_write_samples`、`_write_database`、`_publish`と`preprocessing.py`、`dinov3_extractor.py`。外部資料との照合はしておらず、CNN側との一致を保証するものではない。外部入力契約はここでは定義しない。
+DINOv3側が生成しCNN側へ渡す自己完結bundleの出力契約を定める。出力実装の対応位置は移行後の`src/dinov3_pipeline/saving/delivery_exporter.py`（`SCHEMA`、`_write_samples`、`_write_database`、`_publish`）、`data_loading/preprocessing.py`、`dinov3/extractor.py`である。外部資料との照合はしておらず、CNN側との一致を保証するものではない。外部入力契約はここでは定義しない。
+
+## 合意済みの契約差分
+
+Transformers移行の明示許可差分として、`dataset_metadata`から`weights_sha256` key/value行を削除する。下記の従来metadata契約に対する差分であり、SQLiteのテーブル名・列名・列型・DDL、`samples`の内容、bundle内のファイル形式や保存順序は変更しない。`weights_sha256`は列ではなく、従来`dataset_metadata`に格納していたkeyである。
 
 ## 提供側・利用側の入出力
 
@@ -40,7 +44,7 @@ DINOv3側が生成しCNN側へ渡す自己完結bundleの出力契約を定め�
 | `key` | TEXT | 必須・非NULL | PRIMARY KEY |
 | `value` | TEXT | 必須・非NULL | NOT NULL |
 
-次の7キーを各1行保存する。値はすべてTEXT。
+次の6キーを各1行保存する。値はすべてTEXT。
 
 | key | value |
 |---|---|
@@ -50,7 +54,8 @@ DINOv3側が生成しCNN側へ渡す自己完結bundleの出力契約を定め�
 | `feature_layout` | `"HWC"` |
 | `feature_dtype` | `"float32"` |
 | `model_name` | DINOv3モデル名 |
-| `weights_sha256` | 重みファイルのSHA-256 hex |
+
+これは従来の7 keyから`weights_sha256`行のみを削除した差分であり、SQLiteのテーブル・列構造変更ではない。SHA-256値を別keyや列へ置き換えることも本差分に含めない。
 
 ### `samples`
 
@@ -71,7 +76,7 @@ DINOv3側が生成しCNN側へ渡す自己完結bundleの出力契約を定め�
 ## 保存・公開・読取可能時点
 
 1. 抽出前後の承認状態・原本検証を経たrecordsについて、delivery_root配下の一時directoryに画像と特徴量を保存する。
-2. 保存できたsampleの行と7件のmetadataを一時bundleのSQLiteへINSERTし、commit後に接続を閉じる。この時点では公開先に未配置でありCNN側の読取対象ではない。
+2. 保存できたsampleの行と6件のmetadataを一時bundleのSQLiteへINSERTし、commit後に接続を閉じる。この時点では公開先に未配置でありCNN側の読取対象ではない。
 3. issues.csv生成とdebug出力先の存在確認後、`_publish`が完成したCNN version directoryを`cnn/<dataset_version>/`へ`Path.replace`で移す。この移動完了時点でCNNのDB・参照ファイルを読取可能になる。一時directoryは利用しない。
 4. CNNの移動**後**にdebug directoryとissues.csvを順次移動する。CNN/debug全体を一括公開するトランザクションや完了マーカーはないため、CNNの存在だけでdebug公開完了・実行全体成功とは判断しない。
 
@@ -81,6 +86,6 @@ DINOv3側が生成しCNN側へ渡す自己完結bundleの出力契約を定め�
 
 ## 受け入れ条件
 
-- bundleだけでSQLiteの全相対pathを解決でき、画像・NPY・全列・7 metadataの型と値が本契約に一致する。
+- bundleだけでSQLiteの全相対pathを解決でき、画像・NPY・全列・6 metadataの型と値が本契約に一致する。従来からの明示許可差分は`dataset_metadata.weights_sha256`行の削除のみで、テーブル・列構造は維持されている。
 - `mask_depth`の記録と実際のdepth背景処理が一致する。
 - 保存commit／close後にCNNを公開し、その後debugを移動する実順序と文書が一致する。外部入力契約や外部側との一致を推測で補わない。

@@ -44,6 +44,7 @@ class FeatureArtifact:
     dtype: str
     model_name: str
     weights_sha256: str
+    block_paths: tuple[Path, Path, Path, Path]
 
 
 @dataclass(frozen=True)

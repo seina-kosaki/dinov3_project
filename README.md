@@ -58,7 +58,11 @@ dinov3_delivery/
     rgb/       # mask外を0にしたlossless PNG crop
     depth/     # 元値・float32 modeを保つTIFF crop
     masks/     # 二値PNG crop
-    features/  # DINOv3 float32 HWC NPY
+    features/         # 最終Block + Final LayerNormのfloat32 HWC NPY
+    feature_block_1/  # 第1/4層位置のFinal LayerNorm前 NPY
+    feature_block_2/  # 第2/4層位置のFinal LayerNorm前 NPY
+    feature_block_3/  # 第3/4層位置のFinal LayerNorm前 NPY
+    feature_block_4/  # 最終BlockのFinal LayerNorm前 NPY
   debug/<dataset_version>/<日付>/<session_id>/pca_rgb/
     <sample>.png  # crop RGBとPCA-RGB特徴量の比較
   debug/<dataset_version>/issues.csv
@@ -66,9 +70,9 @@ dinov3_delivery/
 
 新規出力は上記のcapture単位の配置を使う。capture_IDは既存の`dataset_version`を指す。既存出力は移動・上書きせず、採番・重複検出は新旧両階層を参照する。詳細は[受け渡し仕様のDebug節](docs/cnn_delivery_handoff.md#debug)を参照する。
 
-RGB・depth・maskはmaskのforeground boundsを含む同じcrop座標で切り出し、resize/paddingは行わない。RGBはmask外を0にする。depthは通常実行の既定`mask_depth: false`ではcrop内のmask外も元値を保ち、`true`時だけmask外を0にする。元ファイルは変更しない。depthはDINOv3へは入力せず、CNN用cropとして保存する。特徴量NPYは`float32`の`(Hpatch, Wpatch, C)`である。
+RGB・depth・maskはmaskのforeground boundsを含む同じcrop座標で切り出し、resize/paddingは行わない。RGBはmask外を0にする。depthは通常実行の既定`mask_depth: false`ではcrop内のmask外も元値を保ち、`true`時だけmask外を0にする。元ファイルは変更しない。depthはDINOv3へは入力せず、CNN用cropとして保存する。全特徴量NPYは`float32`の`(Hpatch, Wpatch, C)`で、`feature`は最終BlockのFinal LayerNorm適用後、`feature_block_1`〜`4`は層位置`L/4, L/2, 3L/4, L`のFinal LayerNorm適用前の出力である。sample行のSQLiteには既存の`feature_path`と4つのblock特徴量pathを保存する。
 
-CNN用SQLiteは`dataset_metadata`と`samples`の2テーブルだけである。sample行には`sample_id`、`instrument_uid`、`session_id`、`image_id`、`capture_date`と、RGB/depth/mask/featureのbundle相対pathを保存する。モデル名、cropサイズ、特徴量layout等はdataset単位のmetadataにまとめる。既存契約からの許可済み差分として`dataset_metadata`の`weights_sha256` keyは出力しないが、SQLiteのテーブル・列構造は維持する。詳細は[CNN出力契約](docs/contracts/cnn_delivery.md#合意済みの契約差分)を参照する。出力versionは上書きしない。
+CNN用SQLiteは`dataset_metadata`と`samples`の2テーブルだけである。sample行には`sample_id`、`instrument_uid`、`session_id`、`image_id`、`capture_date`と、RGB/depth/mask/feature/feature_block_1〜4のbundle相対pathを保存する。モデル名、cropサイズ、特徴量layout等はdataset単位のmetadataにまとめる。`dataset_metadata`の`weights_sha256` keyは出力しない。特徴量directoryおよび`samples`の追加path列を含む詳細は[CNN出力契約](docs/contracts/cnn_delivery.md#合意済みの契約差分)を参照する。出力versionは上書きしない。
 
 ## 補足
 

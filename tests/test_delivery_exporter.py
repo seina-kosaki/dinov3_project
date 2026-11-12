@@ -27,14 +27,14 @@ import pytest
 from conftest import DEPTH_VALUE, SampleFactory
 from PIL import Image
 
-from dinov3_pipeline.domain.models import (
+from dinov3_pipeline.common.models import (
     DataContractError,
     DeliveryOutput,
     FeatureArtifact,
     ReadySample,
 )
-from dinov3_pipeline.infrastructure import delivery_exporter
-from dinov3_pipeline.infrastructure.delivery_exporter import export_delivery
+from dinov3_pipeline.saving import delivery_exporter
+from dinov3_pipeline.saving.delivery_exporter import export_delivery
 
 CROP_SIZE = 32
 VERSION = "capture_v001"
@@ -48,6 +48,10 @@ SAMPLE_COLUMNS = {
     "depth_path",
     "mask_path",
     "feature_path",
+    "feature_block_1_path",
+    "feature_block_2_path",
+    "feature_block_3_path",
+    "feature_block_4_path",
 }
 
 
@@ -73,7 +77,23 @@ def _artifact(tmp_path: Path, weights_sha256: str = "weights-1") -> FeatureArtif
     """
     path = tmp_path / f"feature-{weights_sha256}.npy"
     np.save(path, np.arange(16, dtype=np.float32).reshape(2, 2, 4), allow_pickle=False)
-    return FeatureArtifact(path, (2, 2, 4), "float32", "dinov3_test", weights_sha256)
+    block_paths = []
+    for index in range(1, 5):
+        block_path = tmp_path / f"feature_block_{index}-{weights_sha256}.npy"
+        np.save(
+            block_path,
+            np.full((2, 2, 4), index, dtype=np.float32),
+            allow_pickle=False,
+        )
+        block_paths.append(block_path)
+    return FeatureArtifact(
+        path,
+        (2, 2, 4),
+        "float32",
+        "dinov3_test",
+        weights_sha256,
+        tuple(block_paths),
+    )
 
 
 @pytest.fixture
@@ -101,7 +121,19 @@ def _row(delivered: Delivered) -> tuple[str, ...]:
     return row
 
 
-@pytest.mark.parametrize("directory", ["rgb", "depth", "masks", "features"])
+@pytest.mark.parametrize(
+    "directory",
+    [
+        "rgb",
+        "depth",
+        "masks",
+        "features",
+        "feature_block_1",
+        "feature_block_2",
+        "feature_block_3",
+        "feature_block_4",
+    ],
+)
 def test_export_delivery_valid_sample_creates_asset_directory(delivered: Delivered, directory: str) -> None:
     """CNN bundleに、各アセットのディレクトリを作る。"""
     # 準備・実行
@@ -151,6 +183,10 @@ def test_export_delivery_schema_types_nullability_and_primary_keys(delivered: De
             "depth_path",
             "mask_path",
             "feature_path",
+            "feature_block_1_path",
+            "feature_block_2_path",
+            "feature_block_3_path",
+            "feature_block_4_path",
         ]
     )
     with sqlite3.connect(delivered.output.cnn_path / "metadata.sqlite3") as connection:
@@ -168,7 +204,7 @@ def test_export_delivery_schema_types_nullability_and_primary_keys(delivered: De
 
 
 def test_export_delivery_metadata_matches_contract(delivered: Delivered) -> None:
-    """7件のmetadataをTEXTで保存する。"""
+    """6件のmetadataをTEXTで保存する。"""
     with sqlite3.connect(delivered.output.cnn_path / "metadata.sqlite3") as connection:
         metadata = dict(connection.execute("SELECT key, value FROM dataset_metadata"))
     assert metadata == {
@@ -178,7 +214,6 @@ def test_export_delivery_metadata_matches_contract(delivered: Delivered) -> None
         "feature_layout": "HWC",
         "feature_dtype": "float32",
         "model_name": delivered.artifact.model_name,
-        "weights_sha256": delivered.artifact.weights_sha256,
     }
 
 
@@ -242,12 +277,20 @@ def test_export_delivery_depth_background_matches_selected_mask_setting(make_sam
 def test_export_delivery_valid_sample_copies_feature_npy_unchanged(
     delivered: Delivered,
 ) -> None:
-    """特徴量NPYを内容を変えずにbundleへコピーする。"""
-    # 準備・実行
-    copied = np.load(delivered.output.cnn_path / _row(delivered)[8], allow_pickle=False)
-
-    # 検証
-    np.testing.assert_array_equal(copied, np.load(delivered.artifact.path, allow_pickle=False))
+    """最終特徴量と4つのblock NPYを内容を変えずにbundleへコピーする。"""
+    row = _row(delivered)
+    sources = (delivered.artifact.path, *delivered.artifact.block_paths)
+    key = hashlib.sha256(delivered.sample.sample_id.encode("utf-8")).hexdigest()
+    expected_paths = [
+        f"features/{key}.npy",
+        *(f"feature_block_{index}/{key}.npy" for index in range(1, 5)),
+    ]
+    assert list(row[8:]) == expected_paths
+    for source, relative in zip(sources, row[8:]):
+        copied = np.load(delivered.output.cnn_path / relative, allow_pickle=False)
+        np.testing.assert_array_equal(copied, np.load(source, allow_pickle=False))
+        assert copied.dtype == np.float32
+        assert copied.shape == (2, 2, 4)
 
 
 def test_export_delivery_valid_sample_writes_pca_under_date_and_session(
@@ -373,7 +416,7 @@ def test_export_delivery_publication_order_and_failure_state(
             with closing(sqlite3.connect(source / "metadata.sqlite3")) as connection:
                 row = connection.execute("SELECT * FROM samples").fetchone()
                 assert all((source / relative).is_file() for relative in row[5:])
-                assert connection.execute("SELECT COUNT(*) FROM dataset_metadata").fetchone() == (7,)
+                assert connection.execute("SELECT COUNT(*) FROM dataset_metadata").fetchone() == (6,)
         else:
             assert (cnn / "metadata.sqlite3").is_file()
         if phase == failure_at:

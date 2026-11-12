@@ -12,7 +12,7 @@ C:\work\SPD\dinov3_delivery\cnn\<dataset_version>/
 
 `shared_data`、debug directory、元のsession SQLiteは共有しない。出力は自己完結しており、ファイル参照はbundle相対pathで記録される。
 
-通常の `dataset_version` は `capture_v001` からの連番で自動採番し、CNN・debug・SQLite metadataで共用する。既存成果物と内部予約記録の最大番号+1を使い、失敗した予約番号は欠番とする。`.dataset_versions/` は採番用の内部記録であり共有しない。明示version指定も未使用名のみ受け付ける。成果物形式・公開時点は変えない。
+通常の `dataset_version` は `capture_v001` からの連番で自動採番し、CNN・debug・SQLite metadataで共用する。既存成果物と内部予約記録の最大番号+1を使い、失敗した予約番号は欠番とする。`.dataset_versions/` は採番用の内部記録であり共有しない。明示version指定も未使用名のみ受け付ける。特徴量の構成・SQL参照列は[契約正本](contracts/cnn_delivery.md)に従い、その他の成果物形式と公開時点は変えない。
 
 ## 構成
 
@@ -48,7 +48,7 @@ C:\work\SPD\dinov3_delivery\cnn\<dataset_version>/
 
 - [契約正本の保存・公開節](contracts/cnn_delivery.md#保存公開読取可能時点)の順序を維持する。一時領域で書き出し、SQLiteのcommit・close、issues.csv生成とdebug出力先の存在確認後にCNNを公開し、その後PCAのディレクトリを相対pathのソート順、issues.csvを最後に移動する。
 - 公開前の書き込み・出力先確認、またはCNN移動自体の失敗では新しいCNNを公開しない。CNN公開後のdebug移動失敗では、完成済みCNNと移動済みdebugを残し、未移動分は通常の例外終了時に一時領域とともに削除する。ロールバック、一括トランザクション、完了マーカーは追加しない。
-- CNNの読取可能時点はCNN directoryの移動完了時点のまま。CNNの存在だけでdebug完了や実行全体成功と判断しない。CNN bundle構成・SQLite契約・公開済み成果物の非上書き方針は変更しない。
+- CNNの読取可能時点はCNN directoryの移動完了時点のまま。CNNの存在だけでdebug完了や実行全体成功と判断しない。特徴量ディレクトリとSQLite path列は契約正本の合意済み構成を使い、その他のCNN bundle構成と公開済み成果物の非上書き方針を維持する。
 
 ### 実装方針・受け入れ条件
 

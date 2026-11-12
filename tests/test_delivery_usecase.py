@@ -23,14 +23,14 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from dinov3_pipeline.domain.models import (
+from dinov3_pipeline.common.models import (
     DataContractError,
     FeatureArtifact,
     ReadySample,
     SampleLoadResult,
 )
-from dinov3_pipeline.infrastructure.preprocessing import prepare_crop
-from dinov3_pipeline.infrastructure.session_repository import SessionSam3Repository
+from dinov3_pipeline.data_loading.preprocessing import prepare_crop
+from dinov3_pipeline.data_loading.session_repository import SessionSam3Repository
 from dinov3_pipeline.usecase.delivery import run_delivery
 
 CROP_SIZE = 64
@@ -64,10 +64,25 @@ class ArrayExtractor:
             np.arange(16, dtype=np.float32).reshape(2, 2, 4),
             allow_pickle=False,
         )
+        block_paths = []
+        for index in range(1, 5):
+            block_path = destination.parent / f"feature_block_{index}" / destination.name
+            block_path.parent.mkdir(parents=True, exist_ok=True)
+            np.save(
+                block_path,
+                np.full((2, 2, 4), index, dtype=np.float32),
+                allow_pickle=False,
+            )
+            block_paths.append(block_path)
         if self.after_write is not None:
             self.after_write()
         return FeatureArtifact(
-            destination, (2, 2, 4), "float32", "dinov3_test", "weights-1"
+            destination,
+            (2, 2, 4),
+            "float32",
+            "dinov3_test",
+            "weights-1",
+            tuple(block_paths),
         )
 
 

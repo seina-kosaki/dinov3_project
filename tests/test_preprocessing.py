@@ -20,8 +20,8 @@ import pytest
 from conftest import DEPTH_VALUE, RGB_COLOR, SampleFactory
 from PIL import Image
 
-from dinov3_pipeline.domain.models import DataContractError
-from dinov3_pipeline.infrastructure.preprocessing import prepare_crop
+from dinov3_pipeline.common.models import DataContractError
+from dinov3_pipeline.data_loading.preprocessing import prepare_crop
 
 CROP_SIZE = 32
 

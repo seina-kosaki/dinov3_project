@@ -25,7 +25,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from dinov3_pipeline.domain.models import ReadySample
+from dinov3_pipeline.common.models import ReadySample
 
 MaskBox = tuple[int, int, int, int]
 SampleFactory = Callable[..., ReadySample]

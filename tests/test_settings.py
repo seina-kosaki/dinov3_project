@@ -22,7 +22,7 @@ import pytest
 from pydantic import ValidationError
 from pydantic_settings import PydanticBaseSettingsSource, YamlConfigSettingsSource
 
-from dinov3_pipeline.constants import CONFIG_DIR
+from dinov3_pipeline.common.constants import CONFIG_DIR
 from dinov3_pipeline.settings import Settings, load_settings
 
 

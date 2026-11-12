@@ -27,17 +27,17 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from dinov3_pipeline.constants import FEATURE_SUFFIX, STAGING_DIR
-from dinov3_pipeline.domain.models import (
+from dinov3_pipeline.common.constants import FEATURE_SUFFIX, STAGING_DIR
+from dinov3_pipeline.common.models import (
     DataContractError,
     DeliveryOutput,
     FeatureArtifact,
     ReadySample,
     SampleLoadResult,
 )
-from dinov3_pipeline.domain.ports import FeatureExtractor
-from dinov3_pipeline.infrastructure.delivery_exporter import export_delivery
-from dinov3_pipeline.infrastructure.session_repository import SessionSam3Repository
+from dinov3_pipeline.common.ports import FeatureExtractor
+from dinov3_pipeline.data_loading.session_repository import SessionSam3Repository
+from dinov3_pipeline.saving.delivery_exporter import export_delivery
 
 LOGGER = logging.getLogger(__name__)
 

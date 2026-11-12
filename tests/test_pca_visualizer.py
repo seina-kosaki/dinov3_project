@@ -21,8 +21,8 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from dinov3_pipeline.domain.models import DataContractError
-from dinov3_pipeline.infrastructure.pca_visualizer import save_pca_visualization
+from dinov3_pipeline.common.models import DataContractError
+from dinov3_pipeline.saving.pca_visualizer import save_pca_visualization
 
 IMAGE_SIZE = 32
 RGB_COLOR = (100, 120, 140)

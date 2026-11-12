@@ -7,9 +7,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from dinov3_pipeline.domain.models import FeatureArtifact
+from dinov3_pipeline.common.models import FeatureArtifact
 from dinov3_pipeline.entrypoints import deliver
-from dinov3_pipeline.infrastructure import delivery_exporter
+from dinov3_pipeline.saving import delivery_exporter
 from dinov3_pipeline.settings import load_settings
 
 
@@ -19,7 +19,20 @@ class ArrayExtractor:
 
     def extract(self, sample: object, destination: Path) -> FeatureArtifact:
         np.save(destination, np.arange(16, dtype=np.float32).reshape(2, 2, 4))
-        return FeatureArtifact(destination, (2, 2, 4), "float32", "dinov3_test", "weights-1")
+        block_paths = []
+        for index in range(1, 5):
+            block_path = destination.parent / f"feature_block_{index}" / destination.name
+            block_path.parent.mkdir(parents=True, exist_ok=True)
+            np.save(block_path, np.full((2, 2, 4), index, dtype=np.float32))
+            block_paths.append(block_path)
+        return FeatureArtifact(
+            destination,
+            (2, 2, 4),
+            "float32",
+            "dinov3_test",
+            "weights-1",
+            tuple(block_paths),
+        )
 
 
 @pytest.fixture

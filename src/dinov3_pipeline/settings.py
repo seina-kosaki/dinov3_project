@@ -20,6 +20,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
 from pydantic import Field, field_validator
 from pydantic_settings import (
     BaseSettings,
@@ -34,6 +35,7 @@ from dinov3_pipeline.common.constants import (
     ENV_PREFIX,
     LEGACY_MODEL_ALIASES,
     PRETRAIN_NORMALIZATION,
+    PROJECT_ROOT,
     SAFE_NAME_PATTERN,
     SUPPORTED_MODEL_NAMES,
 )
@@ -97,9 +99,7 @@ class Settings(BaseSettings):
         """
         canonical = LEGACY_MODEL_ALIASES.get(value, value)
         if value not in SUPPORTED_MODEL_NAMES and canonical not in SUPPORTED_MODEL_NAMES:
-            raise ValueError(
-                f"model_nameは{SUPPORTED_MODEL_NAMES}のいずれかである必要がある: {value}"
-            )
+            raise ValueError(f"model_nameは{SUPPORTED_MODEL_NAMES}のいずれかである必要がある: {value}")
         return value
 
     @field_validator("pretrain_dataset")
@@ -117,9 +117,7 @@ class Settings(BaseSettings):
             ValueError: 未対応の場合。
         """
         if value not in PRETRAIN_NORMALIZATION:
-            raise ValueError(
-                f"pretrain_datasetは{tuple(PRETRAIN_NORMALIZATION)}のいずれかである必要がある: {value}"
-            )
+            raise ValueError(f"pretrain_datasetは{tuple(PRETRAIN_NORMALIZATION)}のいずれかである必要がある: {value}")
         return value
 
     @classmethod
@@ -158,4 +156,5 @@ def load_settings(**overrides: Any) -> Settings:
     Raises:
         pydantic.ValidationError: 設定値が不正な場合（ValueError のサブクラス）。
     """
+    load_dotenv(PROJECT_ROOT / ".env")
     return Settings(**overrides)

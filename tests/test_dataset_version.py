@@ -6,7 +6,7 @@ from threading import Barrier
 
 import pytest
 
-from dinov3_pipeline.infrastructure.dataset_version import reserve_dataset_version
+from dinov3_pipeline.saving.dataset_version import reserve_dataset_version
 
 
 def test_empty_root_and_repeated_reservations(tmp_path: Path) -> None:

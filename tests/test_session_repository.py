@@ -21,8 +21,8 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from dinov3_pipeline.domain.models import DataContractError
-from dinov3_pipeline.infrastructure.session_repository import SessionSam3Repository
+from dinov3_pipeline.common.models import DataContractError
+from dinov3_pipeline.data_loading.session_repository import SessionSam3Repository
 
 TIMEOUT_SECONDS = 1.0
 DB_OBJECT_COUNT_SQL = "SELECT COUNT(*) FROM sqlite_master"

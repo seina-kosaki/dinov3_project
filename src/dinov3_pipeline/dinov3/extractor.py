@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 
 import numpy as np
+import torch
+from transformers import AutoModel
 
 from dinov3_pipeline.common.constants import (
     FEATURE_DTYPE,
@@ -41,15 +44,6 @@ class Dinov3FeatureExtractor:
         crop_size: int,
         device_name: str | None,
     ) -> None:
-        try:
-            import torch
-        except ImportError as error:
-            raise RuntimeError("DINOv3の推論にはtorchが必要である") from error
-        try:
-            from transformers import AutoModel
-        except ImportError as error:
-            raise RuntimeError("DINOv3の推論にはtransformersが必要である") from error
-
         normalized_model_name = _canonical_model_name(model_name)
         if repo_dir is not None and str(repo_dir) and not Path(repo_dir).exists() and not normalized_model_name.startswith("facebook/"):
             raise RuntimeError(f"DINOv3のリポジトリが見つからない: {repo_dir}")
@@ -64,8 +58,11 @@ class Dinov3FeatureExtractor:
         self._mean_std = PRETRAIN_NORMALIZATION[pretrain_dataset]
         self.device = torch.device(device_name or ("cuda" if torch.cuda.is_available() else "cpu"))
 
+        hf_token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_HUB_TOKEN")
+        from_pretrained_kwargs = {"token": hf_token} if hf_token else {}
+
         try:
-            model = AutoModel.from_pretrained(self.model_id)
+            model = AutoModel.from_pretrained(self.model_id, **from_pretrained_kwargs)
         except Exception as error:
             raise RuntimeError(f"DINOv3を読み込めない: {self.model_id}（{error}）") from error
         self.model = model.to(self.device)
@@ -87,44 +84,76 @@ class Dinov3FeatureExtractor:
         batch = (((tensor - mean) / std) * mask.unsqueeze(0)).unsqueeze(0).to(self.device)
 
         with self._torch.inference_mode():
-            layers = self._intermediate_layers(batch)
+            grid = self.crop_size // self.patch_size
+            block_tokens, final_tokens = self._intermediate_layers(batch, grid)
 
-        grid = self.crop_size // self.patch_size
         block_features: list[np.ndarray] = []
-        for token_map in layers:
-            if token_map.ndim == 3:
-                token_map = token_map[0]
-            if token_map.shape[0] != grid * grid:
-                raise DataContractError(f"patch tokenは{grid * grid}個必要だが、{token_map.shape[0]}個である")
+        for token_map in block_tokens:
             block_features.append(patch_tokens_to_hwc(token_map.float().cpu().numpy(), grid, grid))
 
-        features = block_features[0]
+        features = patch_tokens_to_hwc(final_tokens.float().cpu().numpy(), grid, grid)
         self._save_array(destination, features)
+        block_paths = []
+        for index, block_features_array in enumerate(block_features, start=1):
+            block_path = destination.parent / f"feature_block_{index}" / destination.name
+            self._save_array(block_path, block_features_array)
+            block_paths.append(block_path)
         return FeatureArtifact(
             path=destination,
             shape=(int(features.shape[0]), int(features.shape[1]), int(features.shape[2])),
             dtype=str(features.dtype),
             model_name=self.model_name,
             weights_sha256=self.weights_sha256,
+            block_paths=tuple(block_paths),
         )
 
-    def _intermediate_layers(self, images: object) -> list[np.ndarray]:
-        model = self.model
-        if hasattr(model, "get_intermediate_layers"):
-            layer_indices = self._layer_indices()
-            outputs = model.get_intermediate_layers(images, n=layer_indices, reshape=True, norm=True)
-            return [np.asarray(item[0].float().cpu(), dtype=np.float32) for item in outputs]
+    def _intermediate_layers(self, images: object, grid: int) -> tuple[list[torch.Tensor], torch.Tensor]:
+        outputs = self.model(images, output_hidden_states=True, return_dict=True)
+        hidden_states = outputs.get("hidden_states")
+        final_hidden_state = outputs.get("last_hidden_state")
+        if hidden_states is None or final_hidden_state is None:
+            raise DataContractError("Transformersのhidden_statesとlast_hidden_stateが必要である")
+        if len(hidden_states) != self.num_layers + 1:
+            raise DataContractError(
+                f"hidden_statesはembedding入力と{self.num_layers}個のBlock出力が必要だが、{len(hidden_states)}個である"
+            )
+        selected = [
+            self._patch_tokens(hidden_states[index], grid)
+            for index in self._layer_indices()
+        ]
+        return selected, self._patch_tokens(final_hidden_state, grid)
 
-        if hasattr(model, "forward"):
-            outputs = model(images, output_hidden_states=True, return_dict=True)
-            hidden_states = outputs.get("hidden_states")
-            if hidden_states is not None:
-                selected = []
-                for index in self._layer_indices():
-                    token_map = hidden_states[index - 1]
-                    selected.append(np.asarray(token_map[0].float().cpu(), dtype=np.float32))
-                return selected
-        raise DataContractError("対応するTransformersの中間層APIが見つからない")
+    def _patch_tokens(self, output: torch.Tensor, grid: int) -> torch.Tensor:
+        if output.ndim == 3:
+            output = output[0]
+        if output.ndim != 2:
+            raise DataContractError("中間層出力はpatch token行列または空間patch mapである必要がある")
+
+        patch_count = grid * grid
+        token_count = output.shape[0]
+        special_token_count = self._special_token_count()
+        if token_count != special_token_count + patch_count:
+            raise DataContractError(
+                f"special token数を除いたpatch tokenは{patch_count}個必要だが、"
+                f"出力{token_count}個、モデルのspecial token数{special_token_count}個である"
+            )
+        return output[special_token_count:]
+
+    def _special_token_count(self) -> int:
+        embeddings = getattr(self.model, "embeddings", None)
+        cls_token = getattr(embeddings, "cls_token", None)
+        register_tokens = getattr(embeddings, "register_tokens", None)
+        if cls_token is None or register_tokens is None or cls_token.ndim < 2 or register_tokens.ndim < 2:
+            raise DataContractError("モデル出力のspecial token境界をモデル情報から識別できない")
+
+        cls_count = int(cls_token.shape[-2])
+        register_count = int(register_tokens.shape[-2])
+        configured_register_count = getattr(self.model.config, "num_register_tokens", None)
+        if cls_count <= 0 or register_count < 0:
+            raise DataContractError("モデルのspecial token数が不正である")
+        if configured_register_count is not None and register_count != int(configured_register_count):
+            raise DataContractError("モデル設定と埋め込み層のregister token数が一致しない")
+        return cls_count + register_count
 
     def _layer_indices(self) -> list[int]:
         layers = self.num_layers

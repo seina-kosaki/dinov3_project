@@ -26,11 +26,11 @@ from __future__ import annotations
 
 import logging
 
-from dinov3_pipeline.constants import EXIT_ERROR, EXIT_OK, EXIT_PARTIAL_FAILURE
-from dinov3_pipeline.domain.models import DataContractError
-from dinov3_pipeline.infrastructure.dataset_version import reserve_dataset_version
-from dinov3_pipeline.infrastructure.dinov3_extractor import Dinov3FeatureExtractor
-from dinov3_pipeline.infrastructure.session_repository import SessionSam3Repository
+from dinov3_pipeline.common.constants import EXIT_ERROR, EXIT_OK, EXIT_PARTIAL_FAILURE
+from dinov3_pipeline.common.models import DataContractError
+from dinov3_pipeline.data_loading.session_repository import SessionSam3Repository
+from dinov3_pipeline.dinov3.extractor import Dinov3FeatureExtractor
+from dinov3_pipeline.saving.dataset_version import reserve_dataset_version
 from dinov3_pipeline.settings import load_settings
 from dinov3_pipeline.usecase.delivery import run_delivery
 

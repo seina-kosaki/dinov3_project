@@ -18,8 +18,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from dinov3_pipeline.domain.models import DataContractError
-from dinov3_pipeline.infrastructure.dinov3_extractor import patch_tokens_to_hwc
+from dinov3_pipeline.common.models import DataContractError
+from dinov3_pipeline.dinov3.extractor import patch_tokens_to_hwc
 
 
 def test_patch_tokens_to_hwc_valid_grid_returns_float32_hwc_shape() -> None:

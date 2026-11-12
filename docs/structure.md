@@ -33,7 +33,7 @@ CNN向けファイル構成・SQLite契約の正本は[CNN出力契約](contract
 
 - crop超過時は`DataContractError`にsample ID、crop_size、mask前景寸法を含める。crop関数はprintや重複ログを出さず、呼出境界でissue／ログを記録する。
 - 設定の用途、優先順位、相対path基準、通常実行の`mask_depth: false`を維持する。depthは通常時にmask外の元値を保ち、`true`時のみmask外を0にする。
-- CNN出力のテーブル・列構造および保存・公開順序は維持する。Transformers移行で許可された`dataset_metadata.weights_sha256` key/value行の削除のみ、[出力契約正本](contracts/cnn_delivery.md#合意済みの契約差分)に明記する。
+- CNN出力のテーブル構造および保存・公開順序は維持する。Transformers移行で許可された`dataset_metadata.weights_sha256` key/value行の削除と`samples`への4つのblock特徴量path列追加は、[出力契約正本](contracts/cnn_delivery.md#合意済みの契約差分)に明記する。
 - 外部側との一致や、depthの物理単位・撮影時位置合わせは保証しない。自動採番とdebug公開の順序・失敗時動作はそれぞれの仕様書を正とする。
 
 過去の検証結果（pytest、Mypy、Ruff等）は、その時点の変更範囲に対する記録であり、今回のディレクトリ移動やTransformers移行の検証結果を示すものではない。

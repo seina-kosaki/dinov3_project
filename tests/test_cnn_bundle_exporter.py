@@ -1,13 +1,13 @@
 """CNN bundleとdebug出力の公開仕様を確認する。
 
 責務:
-    export_delivery が、crop・特徴量・最小SQLite・日付/session階層のPCA画像を出力することを確認する。
+    export_cnn_bundle が、crop・特徴量・最小SQLite・日付/session階層のPCA画像を出力することを確認する。
 
 処理の流れ:
-    小さな特徴量とcropを使って export_delivery を実行し、出力の構成と内容を検証する。
+    小さな特徴量とcropを使って export_cnn_bundle を実行し、出力の構成と内容を検証する。
 
 関連ファイル:
-    src/dinov3_pipeline/infrastructure/delivery_exporter.py、tests/conftest.py。
+    src/dinov3_pipeline/infrastructure/cnn_bundle_exporter.py、tests/conftest.py。
 
 設計意図:
     CNNチームが受け取るbundleの構成と最小schemaを、変更に気づけるよう固定する。
@@ -33,8 +33,8 @@ from dinov3_pipeline.common.models import (
     FeatureArtifact,
     ReadySample,
 )
-from dinov3_pipeline.saving import delivery_exporter
-from dinov3_pipeline.saving.delivery_exporter import export_delivery
+from dinov3_pipeline.saving import cnn_bundle_exporter
+from dinov3_pipeline.saving.cnn_bundle_exporter import export_cnn_bundle
 
 CROP_SIZE = 32
 VERSION = "capture_v001"
@@ -65,21 +65,26 @@ class Delivered:
     root: Path
 
 
-def _artifact(tmp_path: Path, weights_sha256: str = "weights-1") -> FeatureArtifact:
+def _artifact(
+    tmp_path: Path,
+    file_suffix: str = "feature",
+    model_name: str = "facebook/dinov3-vits16-pretrain-lvd1689m",
+) -> FeatureArtifact:
     """小さなHWC特徴量を保存し、artifactを返す。
 
     Args:
         tmp_path: 保存先。
-        weights_sha256: 重みのSHA-256。
+        file_suffix: 一時ファイル名の識別子。
+        model_name: 特徴量を生成したモデルID。
 
     Returns:
         保存済みの特徴量 artifact。
     """
-    path = tmp_path / f"feature-{weights_sha256}.npy"
+    path = tmp_path / f"{file_suffix}.npy"
     np.save(path, np.arange(16, dtype=np.float32).reshape(2, 2, 4), allow_pickle=False)
     block_paths = []
     for index in range(1, 5):
-        block_path = tmp_path / f"feature_block_{index}-{weights_sha256}.npy"
+        block_path = tmp_path / f"feature_block_{index}-{file_suffix}.npy"
         np.save(
             block_path,
             np.full((2, 2, 4), index, dtype=np.float32),
@@ -90,8 +95,7 @@ def _artifact(tmp_path: Path, weights_sha256: str = "weights-1") -> FeatureArtif
         path,
         (2, 2, 4),
         "float32",
-        "dinov3_test",
-        weights_sha256,
+        model_name,
         tuple(block_paths),
     )
 
@@ -110,7 +114,7 @@ def delivered(make_sample: SampleFactory, tmp_path: Path) -> Delivered:
     sample = make_sample(size=64, mask_box=(16, 16, 48, 48))
     artifact = _artifact(tmp_path)
     root = tmp_path / "delivery"
-    output = export_delivery(root, CROP_SIZE, VERSION, [(sample, artifact)], [])
+    output = export_cnn_bundle(root, CROP_SIZE, VERSION, [(sample, artifact)], [])
     return Delivered(output, sample, artifact, root)
 
 
@@ -134,7 +138,7 @@ def _row(delivered: Delivered) -> tuple[str, ...]:
         "feature_block_4",
     ],
 )
-def test_export_delivery_valid_sample_creates_asset_directory(delivered: Delivered, directory: str) -> None:
+def test_export_cnn_bundle_valid_sample_creates_asset_directory(delivered: Delivered, directory: str) -> None:
     """CNN bundleに、各アセットのディレクトリを作る。"""
     # 準備・実行
     bundle = delivered.output.cnn_path
@@ -143,7 +147,7 @@ def test_export_delivery_valid_sample_creates_asset_directory(delivered: Deliver
     assert any((bundle / directory).iterdir())
 
 
-def test_export_delivery_valid_sample_writes_only_metadata_and_samples_tables(
+def test_export_cnn_bundle_valid_sample_writes_only_metadata_and_samples_tables(
     delivered: Delivered,
 ) -> None:
     """CNN用SQLiteのテーブルを2つに絞る。"""
@@ -155,7 +159,7 @@ def test_export_delivery_valid_sample_writes_only_metadata_and_samples_tables(
     assert tables == {"dataset_metadata", "samples"}
 
 
-def test_export_delivery_valid_sample_writes_minimal_sample_columns(
+def test_export_cnn_bundle_valid_sample_writes_minimal_sample_columns(
     delivered: Delivered,
 ) -> None:
     """samplesの列を、識別子とパスだけに絞る。"""
@@ -168,7 +172,7 @@ def test_export_delivery_valid_sample_writes_minimal_sample_columns(
 
 
 @pytest.mark.parametrize("table", ["dataset_metadata", "samples"])
-def test_export_delivery_schema_types_nullability_and_primary_keys(delivered: Delivered, table: str) -> None:
+def test_export_cnn_bundle_schema_types_nullability_and_primary_keys(delivered: Delivered, table: str) -> None:
     """出力値の必須性と、PRAGMAが示すDDL制約を区別して検証する。"""
     names = (
         ["key", "value"]
@@ -203,7 +207,7 @@ def test_export_delivery_schema_types_nullability_and_primary_keys(delivered: De
         connection.rollback()
 
 
-def test_export_delivery_metadata_matches_contract(delivered: Delivered) -> None:
+def test_export_cnn_bundle_metadata_matches_contract(delivered: Delivered) -> None:
     """6件のmetadataをTEXTで保存する。"""
     with sqlite3.connect(delivered.output.cnn_path / "metadata.sqlite3") as connection:
         metadata = dict(connection.execute("SELECT key, value FROM dataset_metadata"))
@@ -217,7 +221,7 @@ def test_export_delivery_metadata_matches_contract(delivered: Delivered) -> None
     }
 
 
-def test_export_delivery_valid_sample_records_instrument_session_and_image_ids(
+def test_export_cnn_bundle_valid_sample_records_instrument_session_and_image_ids(
     delivered: Delivered,
 ) -> None:
     """器具ID・session ID・image IDを記録する。"""
@@ -228,7 +232,7 @@ def test_export_delivery_valid_sample_records_instrument_session_and_image_ids(
     assert row[1:5] == ("INS-000001", "session-001", "image-001", "2026-10-30")
 
 
-def test_export_delivery_valid_sample_keeps_float_depth_crop(
+def test_export_cnn_bundle_valid_sample_keeps_float_depth_crop(
     delivered: Delivered,
 ) -> None:
     """depth cropがfloat値を保つ。"""
@@ -242,7 +246,7 @@ def test_export_delivery_valid_sample_keeps_float_depth_crop(
 
 
 @pytest.mark.parametrize("mask_depth", [False, True])
-def test_export_delivery_depth_background_matches_selected_mask_setting(make_sample: SampleFactory, tmp_path: Path, mask_depth: bool) -> None:
+def test_export_cnn_bundle_depth_background_matches_selected_mask_setting(make_sample: SampleFactory, tmp_path: Path, mask_depth: bool) -> None:
     """depth背景とmetadataがmask_depthの選択に一致する。"""
     # 準備
     sample = make_sample(size=64, mask_box=(24, 24, 40, 40))
@@ -252,7 +256,7 @@ def test_export_delivery_depth_background_matches_selected_mask_setting(make_sam
     artifact = _artifact(tmp_path)
 
     # 実行
-    output = export_delivery(
+    output = export_cnn_bundle(
         tmp_path / "delivery",
         CROP_SIZE,
         VERSION,
@@ -274,7 +278,48 @@ def test_export_delivery_depth_background_matches_selected_mask_setting(make_sam
         assert rgb.getpixel((0, 0)) == (0, 0, 0)
 
 
-def test_export_delivery_valid_sample_copies_feature_npy_unchanged(
+def test_export_cnn_bundle_without_rgb_mask_preserves_rgb_and_mask_output(
+    make_sample: SampleFactory, tmp_path: Path
+) -> None:
+    """RGB背景除去を無効にしてもmask PNGを保存し、depth設定と分離する。"""
+    sample = make_sample(size=64, mask_box=(24, 24, 40, 40))
+    source_rgb = Image.new("RGB", (64, 64), (13, 14, 15))
+    source_rgb.paste((120, 80, 40), (24, 24, 40, 40))
+    source_rgb.save(sample.rgb_path)
+    artifact = _artifact(tmp_path)
+    output = export_cnn_bundle(
+        tmp_path / "delivery",
+        CROP_SIZE,
+        VERSION,
+        [(sample, artifact)],
+        [],
+        mask_depth=False,
+        mask_rgb_background=False,
+    )
+    row = _row(Delivered(output, sample, artifact, tmp_path / "delivery"))
+
+    with Image.open(output.cnn_path / row[5]) as rgb:
+        assert rgb.size == (CROP_SIZE, CROP_SIZE)
+        assert rgb.getpixel((0, 0)) == (13, 14, 15)
+    with Image.open(output.cnn_path / row[7]) as mask:
+        assert mask.mode == "L"
+        assert mask.size == (CROP_SIZE, CROP_SIZE)
+        assert mask.getpixel((0, 0)) == 0
+    with Image.open(output.cnn_path / row[6]) as depth:
+        assert depth.getpixel((0, 0)) == pytest.approx(0)
+    with sqlite3.connect(output.cnn_path / "metadata.sqlite3") as connection:
+        metadata = dict(connection.execute("SELECT key, value FROM dataset_metadata"))
+    assert set(metadata) == {
+        "dataset_version",
+        "crop_size",
+        "mask_depth",
+        "feature_layout",
+        "feature_dtype",
+        "model_name",
+    }
+
+
+def test_export_cnn_bundle_valid_sample_copies_feature_npy_unchanged(
     delivered: Delivered,
 ) -> None:
     """最終特徴量と4つのblock NPYを内容を変えずにbundleへコピーする。"""
@@ -293,7 +338,7 @@ def test_export_delivery_valid_sample_copies_feature_npy_unchanged(
         assert copied.shape == (2, 2, 4)
 
 
-def test_export_delivery_valid_sample_writes_pca_under_date_and_session(
+def test_export_cnn_bundle_valid_sample_writes_pca_under_date_and_session(
     delivered: Delivered,
 ) -> None:
     """5つのPCA-RGB画像とcrop RGBを debug/<version>/<日付>/<session>/pca_rgb に保存する。"""
@@ -308,7 +353,7 @@ def test_export_delivery_valid_sample_writes_pca_under_date_and_session(
         assert pca.size == (CROP_SIZE * 3, CROP_SIZE * 2)
 
 
-def test_export_delivery_valid_sample_writes_issues_csv(delivered: Delivered) -> None:
+def test_export_cnn_bundle_valid_sample_writes_issues_csv(delivered: Delivered) -> None:
     """除外理由のCSVを debug/<version> に保存する。"""
     # 準備・実行
     issues = delivered.output.debug_path / VERSION / "issues.csv"
@@ -317,13 +362,13 @@ def test_export_delivery_valid_sample_writes_issues_csv(delivered: Delivered) ->
     assert issues.is_file()
 
 
-def test_export_delivery_existing_version_raises_file_exists_error(
+def test_export_cnn_bundle_existing_version_raises_file_exists_error(
     delivered: Delivered,
 ) -> None:
     """同じversionへの再出力は上書きせず拒否する。"""
     # 準備・実行・検証
     with pytest.raises(FileExistsError):
-        export_delivery(
+        export_cnn_bundle(
             delivered.root,
             CROP_SIZE,
             VERSION,
@@ -332,29 +377,43 @@ def test_export_delivery_existing_version_raises_file_exists_error(
         )
 
 
-def test_export_delivery_mixed_weights_raises_contract_error(make_sample: SampleFactory, tmp_path: Path) -> None:
-    """異なる重みの特徴量を1つのbundleに混ぜない。"""
+def test_export_cnn_bundle_mixed_models_raises_contract_error(make_sample: SampleFactory, tmp_path: Path) -> None:
+    """異なるモデルの特徴量を1つのbundleに混ぜない。"""
     # 準備
     sample = make_sample(size=64, mask_box=(16, 16, 48, 48))
     records = [
-        (sample, _artifact(tmp_path, "weights-1")),
-        (sample, _artifact(tmp_path, "weights-2")),
+        (
+            sample,
+            _artifact(
+                tmp_path,
+                "model-s",
+                "facebook/dinov3-vits16-pretrain-lvd1689m",
+            ),
+        ),
+        (
+            sample,
+            _artifact(
+                tmp_path,
+                "model-b",
+                "facebook/dinov3-vitb16-pretrain-lvd1689m",
+            ),
+        ),
     ]
 
     # 実行・検証
     with pytest.raises(DataContractError, match="混在"):
-        export_delivery(tmp_path / "delivery", CROP_SIZE, VERSION, records, [])
+        export_cnn_bundle(tmp_path / "delivery", CROP_SIZE, VERSION, records, [])
 
 
 @pytest.mark.parametrize("version", ["../escape", "", "bad version"])
-def test_export_delivery_unsafe_version_raises_contract_error(make_sample: SampleFactory, tmp_path: Path, version: str) -> None:
+def test_export_cnn_bundle_unsafe_version_raises_contract_error(make_sample: SampleFactory, tmp_path: Path, version: str) -> None:
     """ディレクトリ名として安全でないversionを拒否する。"""
     # 準備
     sample = make_sample(size=64, mask_box=(16, 16, 48, 48))
 
     # 実行・検証
     with pytest.raises(DataContractError, match="versionが不正"):
-        export_delivery(
+        export_cnn_bundle(
             tmp_path / "delivery",
             CROP_SIZE,
             version,
@@ -363,7 +422,7 @@ def test_export_delivery_unsafe_version_raises_contract_error(make_sample: Sampl
         )
 
 
-def test_export_delivery_oversized_sample_is_excluded_with_diagnostics(
+def test_export_cnn_bundle_oversized_sample_is_excluded_with_diagnostics(
     make_sample: SampleFactory,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -377,7 +436,7 @@ def test_export_delivery_oversized_sample_is_excluded_with_diagnostics(
     image.save(oversized_mask)
     oversized = replace(valid, sample_id="oversized", mask_path=oversized_mask)
     artifact = _artifact(tmp_path)
-    output = export_delivery(
+    output = export_cnn_bundle(
         tmp_path / "delivery",
         CROP_SIZE,
         VERSION,
@@ -394,7 +453,7 @@ def test_export_delivery_oversized_sample_is_excluded_with_diagnostics(
 
 
 @pytest.mark.parametrize("failure_at", ["none", "cnn", "debug", "issues"])
-def test_export_delivery_publication_order_and_failure_state(
+def test_export_cnn_bundle_publication_order_and_failure_state(
     make_sample: SampleFactory,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -428,10 +487,10 @@ def test_export_delivery_publication_order_and_failure_state(
 
     monkeypatch.setattr(Path, "replace", observe_replace)
     if failure_at == "none":
-        export_delivery(root, CROP_SIZE, VERSION, [(sample, artifact)], [])
+        export_cnn_bundle(root, CROP_SIZE, VERSION, [(sample, artifact)], [])
     else:
         with pytest.raises(OSError, match="publish failed"):
-            export_delivery(root, CROP_SIZE, VERSION, [(sample, artifact)], [])
+            export_cnn_bundle(root, CROP_SIZE, VERSION, [(sample, artifact)], [])
     expected_order = ["cnn", "debug", "issues"]
     assert observed == (expected_order if failure_at == "none" else expected_order[: expected_order.index(failure_at) + 1])
     assert cnn.exists() == (failure_at != "cnn")
@@ -441,7 +500,7 @@ def test_export_delivery_publication_order_and_failure_state(
 
 
 @pytest.mark.parametrize("relative", ["issues.csv", "2026-10-30/session-001/pca_rgb/keep.png"])
-def test_export_delivery_existing_debug_prevents_cnn_publication(make_sample: SampleFactory, tmp_path: Path, relative: str) -> None:
+def test_export_cnn_bundle_existing_debug_prevents_cnn_publication(make_sample: SampleFactory, tmp_path: Path, relative: str) -> None:
     """debugの衝突はCNNの移動前に検出し、既存ファイルを維持する。"""
     sample = make_sample(mask_box=(16, 16, 48, 48))
     root = tmp_path / "delivery"
@@ -449,21 +508,21 @@ def test_export_delivery_existing_debug_prevents_cnn_publication(make_sample: Sa
     issues.parent.mkdir(parents=True)
     issues.write_text("existing", encoding="utf-8")
     with pytest.raises(FileExistsError, match="debug出力"):
-        export_delivery(root, CROP_SIZE, VERSION, [(sample, _artifact(tmp_path))], [])
+        export_cnn_bundle(root, CROP_SIZE, VERSION, [(sample, _artifact(tmp_path))], [])
     assert not (root / "cnn" / VERSION).exists()
     assert issues.read_text(encoding="utf-8") == "existing"
     assert not list(root.glob(f".{VERSION}-*"))
 
 
-def test_export_delivery_pca_failure_keeps_cnn_and_records_issues(make_sample: SampleFactory, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_export_cnn_bundle_pca_failure_keeps_cnn_and_records_issues(make_sample: SampleFactory, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     sample = make_sample()
     artifact = _artifact(tmp_path)
 
     def fail(*args: object) -> None:
         raise DataContractError("PCA failed")
 
-    monkeypatch.setattr(delivery_exporter, "save_pca_visualization", fail)
-    output = export_delivery(tmp_path / "delivery", CROP_SIZE, VERSION, [(sample, artifact)], ["input issue"])
+    monkeypatch.setattr(cnn_bundle_exporter, "save_pca_visualization", fail)
+    output = export_cnn_bundle(tmp_path / "delivery", CROP_SIZE, VERSION, [(sample, artifact)], ["input issue"])
     assert output.exported_count == 1
     assert output.visualization_count == 0
     assert output.issue_count == 2
@@ -474,7 +533,7 @@ def test_export_delivery_pca_failure_keeps_cnn_and_records_issues(make_sample: S
     assert copied.read_bytes() == artifact.path.read_bytes()
 
 
-def test_export_delivery_multiple_dates_and_sessions_publish_in_sorted_order(make_sample: SampleFactory, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_export_cnn_bundle_multiple_dates_and_sessions_publish_in_sorted_order(make_sample: SampleFactory, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     sample = make_sample(mask_box=(16, 16, 48, 48))
     samples = [
         replace(sample, sample_id="third", capture_date="2026-10-31", session_id="session-002"),
@@ -494,7 +553,7 @@ def test_export_delivery_multiple_dates_and_sessions_publish_in_sorted_order(mak
         return original_replace(source, target)
 
     monkeypatch.setattr(Path, "replace", observe_replace)
-    output = export_delivery(root, CROP_SIZE, VERSION, [(item, artifact) for item in samples], [])
+    output = export_cnn_bundle(root, CROP_SIZE, VERSION, [(item, artifact) for item in samples], [])
     debug_dirs = sorted({root / "debug" / VERSION / item.capture_date / item.session_id for item in samples})
     assert observed == [output.cnn_path, *debug_dirs, root / "debug" / VERSION / "issues.csv"]
     assert output.exported_count == output.visualization_count == 3
@@ -502,7 +561,7 @@ def test_export_delivery_multiple_dates_and_sessions_publish_in_sorted_order(mak
         key = hashlib.sha256(item.sample_id.encode("utf-8")).hexdigest()
         pca = root / "debug" / VERSION / item.capture_date / item.session_id / "pca_rgb" / f"{key}.png"
         expected = tmp_path / f"expected-{key}.png"
-        delivery_exporter.save_pca_visualization(
+        cnn_bundle_exporter.save_pca_visualization(
             tuple(
                 output.cnn_path / f"feature_block_{index}" / f"{key}.npy"
                 for index in range(1, 5)

@@ -52,7 +52,7 @@ C:\work\SPD\dinov3_delivery\cnn\<dataset_version>/
 
 ### 実装方針・受け入れ条件
 
-変更対象の責務は`src/dinov3_pipeline/saving/delivery_exporter.py`のPCA・issues出力先と公開先の整合、および`src/dinov3_pipeline/saving/dataset_version.py`の使用済みversion探索である。versionの命名・予約方式は変えず、探索の詳細は[自動採番仕様](dataset_version_autonumbering.md)に従う。
+変更対象の責務は`src/dinov3_pipeline/saving/cnn_bundle_exporter.py`のPCA・issues出力先と公開先の整合、および`src/dinov3_pipeline/saving/dataset_version.py`の使用済みversion探索である。versionの命名・予約方式は変えず、探索の詳細は[自動採番仕様](dataset_version_autonumbering.md)に従う。
 
 1. 新規PCA画像が`debug/<dataset_version>/<日付>/<session_id>/pca_rgb/<既存PNG名>`に出力される。複数日付・sessionも同じversion配下にまとまる。
 2. 実行issues.csvが`debug/<dataset_version>/issues.csv`に保存される。PCA失敗理由の記録とCNN特徴量の維持も確認する。
@@ -60,7 +60,7 @@ C:\work\SPD\dinov3_delivery\cnn\<dataset_version>/
 4. 既存の新旧出力を移動・上書きせず、同名出力への公開を拒否する。
 5. CNNの構成・DB・特徴量・PCA画像の名前と内容が不変であり、公開順序と失敗時の残存状態が上記に一致する。
 
-自動検証は`tests/test_delivery_exporter.py`（パス・内容・公開失敗）、`tests/test_dataset_version.py`（新旧階層の採番・重複検出）、`tests/test_deliver_entrypoint.py`（実行起点の採番連携）で行う。実データでの手動確認は別途実施する。
+自動検証は`tests/test_cnn_bundle_exporter.py`（パス・内容・公開失敗）、`tests/test_dataset_version.py`（新旧階層の採番・重複検出）、`tests/test_main_entrypoint.py`（実行起点の採番連携）で行う。実データでの手動確認は別途実施する。
 
 ## 入力条件
 
@@ -68,6 +68,6 @@ C:\work\SPD\dinov3_delivery\cnn\<dataset_version>/
 
 入力元は`shared_data/<日付>/<session_id>/metadata.sqlite3`である。`sam3_dino_results.is_dino_ready=1`だけを対象にし、元RGB・maskのhash、depthの存在、三画像の寸法一致を確認する。承認状態は抽出前後に再検証する。
 
-既定crop sizeは640であり、既定モデル`dinov3_vits16`のpatch size 16で割り切れる。mask全体が設定cropに収まらないsampleはresizeで縮めず除外し、issueへ記録する。crop size/modelを変える実行は別の`dataset_version`で保存する。
+既定crop sizeは672であり、既定モデル`facebook/dinov3-vits16-pretrain-lvd1689m`のpatch size 16で割り切れる。mask全体が設定cropに収まらないsampleはresizeで縮めず除外し、issueへ記録する。crop size/modelを変える実行は別の`dataset_version`で保存する。`model_name`は移行仕様に列挙した公式Hugging FaceモデルIDのみ受け付け、旧別名は受け付けない。
 
 このcrop処理はdepthのピクセル値と寸法を保つが、RGB/depthの撮影時位置合わせやdepth値の物理単位を保証しない。depthを学習入力に使う前に、撮影側で位置合わせと単位を確認する。

@@ -103,6 +103,22 @@ def test_prepare_crop_valid_input_keeps_rgb_color_inside_mask(
     assert cropped.rgb.getpixel((CROP_SIZE // 2, CROP_SIZE // 2)) == RGB_COLOR
 
 
+def test_prepare_crop_without_rgb_mask_preserves_background_and_mask(
+    make_sample: SampleFactory,
+) -> None:
+    """RGB背景除去を無効にしてもmask cropを作り、元のRGB背景を保つ。"""
+    sample = make_sample(mask_box=(24, 24, 40, 40))
+    source_rgb = Image.new("RGB", (64, 64), (13, 14, 15))
+    source_rgb.paste(RGB_COLOR, (24, 24, 40, 40))
+    source_rgb.save(sample.rgb_path)
+
+    cropped = prepare_crop(sample, CROP_SIZE, mask_depth=False, mask_rgb_background=False)
+
+    assert cropped.rgb.getpixel((0, 0)) == (13, 14, 15)
+    assert cropped.mask.getpixel((0, 0)) == 0
+    assert cropped.depth.getpixel((0, 0)) == pytest.approx(0)
+
+
 @pytest.mark.parametrize("modality", ["rgb", "depth"])
 def test_prepare_crop_valid_input_zeroes_background(
     make_sample: SampleFactory, modality: str

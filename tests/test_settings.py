@@ -22,7 +22,7 @@ import pytest
 from pydantic import ValidationError
 from pydantic_settings import PydanticBaseSettingsSource, YamlConfigSettingsSource
 
-from dinov3_pipeline.common.constants import CONFIG_DIR
+from dinov3_pipeline.common.constants import HF_MODEL_IDS
 from dinov3_pipeline.settings import Settings, load_settings
 
 
@@ -55,6 +55,7 @@ def test_load_settings_default_yaml_returns_positive_crop_size() -> None:
     # 検証
     assert settings.crop_size > 0
     assert settings.mask_depth is False
+    assert settings.mask_rgb_background is True
 
 
 def test_load_settings_default_version_is_automatic(
@@ -88,6 +89,18 @@ def test_load_settings_env_override_replaces_mask_depth(
     assert settings.mask_depth is mask_depth
 
 
+@pytest.mark.parametrize("mask_rgb_background", [False, True])
+def test_load_settings_env_override_replaces_rgb_mask_setting(
+    monkeypatch: pytest.MonkeyPatch,
+    mask_rgb_background: bool,
+) -> None:
+    """環境変数でRGB背景除去を切り替えられる。"""
+    monkeypatch.setenv(
+        "DINOV3_MASK_RGB_BACKGROUND", str(mask_rgb_background).lower()
+    )
+    assert load_settings().mask_rgb_background is mask_rgb_background
+
+
 def test_load_settings_env_override_replaces_crop_size(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -107,13 +120,14 @@ def test_load_settings_env_override_replaces_model_name(
 ) -> None:
     """環境変数でモデル名を切り替えられる。"""
     # 準備
-    monkeypatch.setenv("DINOV3_MODEL_NAME", "dinov3_vitl16")
+    model_id = "facebook/dinov3-vitl16-pretrain-lvd1689m"
+    monkeypatch.setenv("DINOV3_MODEL_NAME", model_id)
 
     # 実行
     settings = load_settings()
 
     # 検証
-    assert settings.model_name == "dinov3_vitl16"
+    assert settings.model_name == model_id
 
 
 def test_load_settings_env_override_replaces_pretrain_dataset(
@@ -130,13 +144,15 @@ def test_load_settings_env_override_replaces_pretrain_dataset(
     assert settings.pretrain_dataset == "sat493m"
 
 
-def test_load_settings_relative_weights_path_resolves_from_config_dir() -> None:
-    """相対の重みパスを設定ファイル基準の絶対パスにする。"""
-    # 準備・実行
-    settings = load_settings(weights_path="../weights/custom.pth")
+@pytest.mark.parametrize("model_id", HF_MODEL_IDS)
+def test_load_settings_accepts_only_official_model_ids(model_id: str) -> None:
+    assert load_settings(model_name=model_id).model_name == model_id
 
-    # 検証
-    assert settings.weights_path == (CONFIG_DIR / "../weights/custom.pth").resolve()
+
+@pytest.mark.parametrize("name", ["repo_dir", "weights_path"])
+def test_load_settings_rejects_removed_model_paths(name: str) -> None:
+    with pytest.raises(ValidationError):
+        load_settings(**{name: Path("unused")})
 
 
 def test_load_settings_absolute_path_keeps_given_location(tmp_path: Path) -> None:
@@ -155,6 +171,7 @@ def test_load_settings_absolute_path_keeps_given_location(tmp_path: Path) -> Non
         ("dataset_version", "../escape"),
         ("dataset_version", ""),
         ("sqlite_timeout_seconds", 0),
+        ("model_name", "dinov3_vitl16"),
         ("model_name", "dinov3_convnext_base"),
         ("pretrain_dataset", "unknown"),
     ],

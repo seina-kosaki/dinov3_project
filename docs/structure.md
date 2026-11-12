@@ -4,18 +4,19 @@
 
 ```text
 configs/default.yaml        実行設定（入出力root、model ID、crop等）
+src/main.py                 実行起点・設定と処理部品の組み立て
 src/dinov3_pipeline/
   settings.py               YAML・環境変数からの設定読込
-  entrypoints/deliver.py    実行起点（既存import位置を維持）
-  usecase/delivery.py       入力検証・抽出・再検証・公開のorchestration
+  usecase/sample_processing.py 承認済みsampleの検証・抽出・再検証
   data_loading/             session DBの読込・承認検証・共通crop
   dinov3/                   Transformersモデルのロード・特徴量推論
-  saving/                   version予約、bundle/debug書出しと公開
+  saving/cnn_bundle_exporter.py CNN bundle/debug書出しと公開
+  saving/                   version予約、PCA可視化
   common/                   複数責務から使うデータ契約・境界・utility
 tests/                      pytest
 ```
 
-これはTransformers移行後の構成概要であり、現在の`src/`の実配置ではない。詳細なファイルツリー、旧配置からの移動先、責務とimport関係、entrypoint互換性を含む受け入れ条件は[Transformers移行・可読性改善仕様](huggingface_transformers_refactor.md#srcのディレクトリ構成)を参照する。移行後もパッケージ名`dinov3_pipeline`と`settings.py`、`entrypoints/deliver.py`、`usecase/delivery.py`の場所は維持する。DINOv3用のcloneや`torch.hub`は使わずTransformers/Hugging Faceを使う。
+これは現在の構成概要である。詳細な役割は[Transformers移行・可読性改善仕様](huggingface_transformers_refactor.md#srcのディレクトリ構成)を参照する。`dinov3-pipeline`コマンドも`src/main.py`を実行する。DINOv3用のcloneや`torch.hub`は使わずTransformers/Hugging Faceを使う。
 
 CNN向けファイル構成・SQLite契約の正本は[CNN出力契約](contracts/cnn_delivery.md)、version採番は[自動採番仕様](dataset_version_autonumbering.md)を参照する。
 

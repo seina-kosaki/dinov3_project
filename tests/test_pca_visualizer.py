@@ -85,6 +85,32 @@ def test_save_pca_visualization_foreground_too_small_raises_contract_error(
         save_pca_visualization(feature_paths, rgb_path, mask_path, tmp_path / "pca.png")
 
 
+def test_save_pca_visualization_without_rgb_mask_uses_all_patches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """RGB背景除去無効時は背景maskに関係なく全patchでPCAする。"""
+    feature_paths, rgb_path, mask_path = _write_inputs(tmp_path, mask_value=0, grid=2)
+    observed_counts: list[int] = []
+    monkeypatch.setattr(
+        "dinov3_pipeline.saving.pca_visualizer._pca_colors",
+        lambda vectors: observed_counts.append(len(vectors))
+        or np.zeros((len(vectors), 3), dtype=np.uint8),
+    )
+
+    destination = tmp_path / "pca_unmasked.png"
+    save_pca_visualization(
+        feature_paths,
+        rgb_path,
+        mask_path,
+        destination,
+        mask_rgb_background=False,
+    )
+
+    assert observed_counts == [4] * 5
+    with Image.open(destination) as output:
+        assert output.getpixel((0, 0)) == RGB_COLOR
+
+
 def test_save_pca_visualization_failure_does_not_save_partial_panels(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

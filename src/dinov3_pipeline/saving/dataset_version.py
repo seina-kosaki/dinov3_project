@@ -12,6 +12,7 @@ AUTO_VERSION_PATTERN = re.compile(r"capture_v([0-9]+)")
 
 
 def _output_versions(root: Path) -> set[str]:
+    """すでに使用済みの delivery version を収集して重複を防ぐ。"""
     versions = {path.name for path in (root / CNN_DIR).glob("*")}
     versions.update(path.name for path in (root / DEBUG_DIR / RUNS_DIR).glob("*"))
     versions.update(path.name for path in (root / DEBUG_DIR).glob("*") if path.name != RUNS_DIR)
@@ -20,6 +21,7 @@ def _output_versions(root: Path) -> set[str]:
 
 
 def reserve_dataset_version(delivery_root: Path, dataset_version: str | None = None) -> str:
+    """使用中の version を避けつつ、auto-numeric な新しい出力版を確保する。"""
     if dataset_version is not None and re.fullmatch(SAFE_NAME_PATTERN, dataset_version) is None:
         raise ValueError("dataset_versionは安全なディレクトリ名で指定する必要がある")
 

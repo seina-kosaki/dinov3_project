@@ -9,17 +9,6 @@
     2. 全session DBから is_dino_ready=1 の物体を読む。
     3. 有効な入力があれば、出力versionを予約する。
     4. DINOv3抽出器を作り、抽出と公開を実行して件数を報告する。
-
-関連ファイル:
-    settings.py、usecase/delivery.py、infrastructure/session_repository.py、
-    infrastructure/dataset_version.py、infrastructure/dinov3_extractor.py。
-
-設計意図:
-    引数なしで実行・デバッグ（F5）できるよう、切り替えたい値は設定ファイルか環境変数で渡す。
-    承認済み物体が無い場合は、重いモデルを読み込む前に終了する。
-
-Note:
-    実行には、facebookresearch/dinov3 のclone（repo_dir）と、Meta配布の重み（weights_path）が必要。
 """
 
 from __future__ import annotations
@@ -32,7 +21,7 @@ from dinov3_pipeline.data_loading.session_repository import SessionSam3Repositor
 from dinov3_pipeline.dinov3.extractor import Dinov3FeatureExtractor
 from dinov3_pipeline.saving.dataset_version import reserve_dataset_version
 from dinov3_pipeline.settings import load_settings
-from dinov3_pipeline.usecase.delivery import run_delivery
+from dinov3_pipeline.usecase.sample_processing import process_approved_samples
 
 LOGGER = logging.getLogger(__name__)
 
@@ -62,14 +51,13 @@ def main() -> int:
         )
         LOGGER.info("delivery version: %s", dataset_version)
         extractor = Dinov3FeatureExtractor(
-            settings.repo_dir,
             settings.model_name,
-            settings.weights_path,
             settings.pretrain_dataset,
             settings.crop_size,
             settings.device,
+            settings.mask_rgb_background,
         )
-        summary = run_delivery(
+        summary = process_approved_samples(
             loaded,
             repository,
             extractor,
@@ -77,6 +65,7 @@ def main() -> int:
             settings.crop_size,
             dataset_version,
             settings.mask_depth,
+            settings.mask_rgb_background,
         )
     except (DataContractError, OSError, ValueError, RuntimeError):
         LOGGER.exception("DINOv3のdeliveryが失敗した")

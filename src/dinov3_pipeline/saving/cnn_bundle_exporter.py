@@ -61,27 +61,31 @@ FEATURE_BLOCK_DIRS = tuple(f"feature_block_{index}" for index in range(1, 5))
 
 @dataclass
 class _WriteResult:
+    """1回の export で作った sample 行・debug 出力・問題一覧をまとめて保持する。"""
+
     rows: list[tuple[str, ...]] = field(default_factory=list)
     debug_dirs: set[PurePosixPath] = field(default_factory=set)
     issues: list[str] = field(default_factory=list)
     visualization_count: int = 0
 
 
-def export_delivery(
+def export_cnn_bundle(
     delivery_root: Path,
     crop_size: int,
     dataset_version: str,
     records: list[tuple[ReadySample, FeatureArtifact]],
     issues: list[str],
     mask_depth: bool = True,
+    mask_rgb_background: bool = True,
 ) -> DeliveryOutput:
+    """承認済み sample を CNN bundle と debug 出力へ一括で書き出す。"""
     if re.fullmatch(SAFE_NAME_PATTERN, dataset_version) is None:
         raise DataContractError(f"dataset versionが不正である: {dataset_version}")
     if not records:
         raise DataContractError("CNN bundleへ出力できる承認済みsampleがない")
-    models = {(artifact.model_name, artifact.weights_sha256) for _, artifact in records}
-    if len(models) != 1:
-        raise DataContractError("同一bundle内でDINOv3モデルまたは重みを混在できない")
+    model_names = {artifact.model_name for _, artifact in records}
+    if len(model_names) != 1:
+        raise DataContractError("同一bundle内でDINOv3モデルを混在できない")
 
     root = Path(delivery_root).resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -97,10 +101,18 @@ def export_delivery(
         for name in (RGB_DIR, DEPTH_DIR, MASK_DIR, FEATURE_DIR, *FEATURE_BLOCK_DIRS):
             (bundle / name).mkdir(parents=True, exist_ok=True)
 
-        result = _write_samples(records, crop_size, dataset_version, bundle, debug, mask_depth)
+        result = _write_samples(
+            records,
+            crop_size,
+            dataset_version,
+            bundle,
+            debug,
+            mask_depth,
+            mask_rgb_background,
+        )
         if not result.rows:
             raise DataContractError("CNN bundleへ出力できるcropがない")
-        model_name, _ = next(iter(models))
+        model_name = next(iter(model_names))
         _write_database(
             bundle / METADATA_DB,
             dataset_version,
@@ -124,7 +136,9 @@ def _write_samples(
     bundle: Path,
     debug: Path,
     mask_depth: bool,
+    mask_rgb_background: bool,
 ) -> _WriteResult:
+    """各 sample を crop・特徴量・debug 画像へ書き出し、SQLite 行も準備する。"""
     result = _WriteResult()
     for sample, artifact in records:
         key = hashlib.sha256(sample.sample_id.encode("utf-8")).hexdigest()
@@ -139,7 +153,9 @@ def _write_samples(
         try:
             _validate_segment(sample.capture_date, "capture date")
             _validate_segment(sample.session_id, "session ID")
-            cropped = prepare_crop(sample, crop_size, mask_depth)
+            cropped = prepare_crop(
+                sample, crop_size, mask_depth, mask_rgb_background
+            )
             if len(artifact.block_paths) != len(FEATURE_BLOCK_DIRS):
                 raise DataContractError("DINO特徴量には4つのblock出力が必要である")
             feature_sources = (artifact.path, *artifact.block_paths)
@@ -168,6 +184,7 @@ def _write_samples(
                     bundle / rgb,
                     bundle / mask,
                     debug / debug_dir / PCA_DIR / f"{key}{IMAGE_SUFFIX}",
+                    mask_rgb_background,
                 )
                 result.visualization_count += 1
                 result.debug_dirs.add(debug_dir)
@@ -201,6 +218,7 @@ def _write_database(
     rows: list[tuple[str, ...]],
     mask_depth: bool,
 ) -> None:
+    """dataset_metadata と samples を SQLite に書き出す。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(path)
     try:
@@ -224,6 +242,7 @@ def _write_database(
 
 
 def _write_issues(path: Path, issues: list[str]) -> None:
+    """debug 配下に出力した問題の一覧を CSV として保存する。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8-sig", newline="") as stream:
         writer = csv.writer(stream)
@@ -232,6 +251,7 @@ def _write_issues(path: Path, issues: list[str]) -> None:
 
 
 def _publish(staging: Path, root: Path, dataset_version: str, debug_dirs: set[PurePosixPath]) -> None:
+    """staging から最終的な delivery_root へ成果物を移動する。"""
     debug_root = root / DEBUG_DIR
     issues_relative = Path(dataset_version) / ISSUES_FILE
     moves = [(staging / DEBUG_DIR / rel, debug_root / rel) for rel in sorted(debug_dirs)]
@@ -249,5 +269,6 @@ def _publish(staging: Path, root: Path, dataset_version: str, debug_dirs: set[Pu
 
 
 def _validate_segment(value: str, label: str) -> None:
+    """session_id や capture_date などの安全な path segment かどうか検証する。"""
     if re.fullmatch(SAFE_NAME_PATTERN, value) is None:
         raise DataContractError(f"{label}がdirectory名として不正: {value}")

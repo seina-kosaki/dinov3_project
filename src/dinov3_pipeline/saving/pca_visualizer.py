@@ -27,7 +27,9 @@ def save_pca_visualization(
     rgb_path: Path,
     mask_path: Path,
     destination: Path,
+    mask_rgb_background: bool = True,
 ) -> None:
+    """特徴量の PCA 主成分を RGB と並べてデバッグ画像として保存する。"""
     with Image.open(rgb_path) as source:
         rgb = source.convert("RGB")
 
@@ -42,10 +44,14 @@ def save_pca_visualization(
             raise DataContractError("PCA可視化にはfloat32 HWC特徴量が必要である")
 
         grid_height, grid_width, channels = features.shape
-        valid = _foreground_patches(mask_path, grid_height, grid_width)
+        if mask_rgb_background:
+            valid = _foreground_patches(mask_path, grid_height, grid_width)
+        else:
+            valid = np.ones(grid_height * grid_width, dtype=bool)
         vectors = features.reshape(-1, channels)[valid]
         if len(vectors) < PCA_COMPONENTS:
-            raise DataContractError(f"PCA可視化に必要な前景patchが{PCA_COMPONENTS}個未満である")
+            label = "前景patch" if mask_rgb_background else "patch"
+            raise DataContractError(f"PCA可視化に必要な{label}が{PCA_COMPONENTS}個未満である")
 
         colors = _pca_colors(vectors)
         grid = np.zeros((grid_height * grid_width, PCA_COMPONENTS), dtype=np.uint8)
@@ -61,6 +67,7 @@ def save_pca_visualization(
 
 
 def _foreground_patches(mask_path: Path, grid_height: int, grid_width: int) -> np.ndarray:
+    """crop の各 patch に対して、前景に相当する位置を 0/1 のmaskで返す。"""
     with Image.open(mask_path) as source:
         small = source.convert("L").resize((grid_width, grid_height), Image.Resampling.BILINEAR)
     coverage = np.asarray(small, dtype=np.float32).reshape(-1) / MASK_FOREGROUND
@@ -68,6 +75,7 @@ def _foreground_patches(mask_path: Path, grid_height: int, grid_width: int) -> n
 
 
 def _pca_colors(vectors: np.ndarray) -> np.ndarray:
+    """PCA で圧縮した特徴量を RGB の色値へ変換する。"""
     normalized = vectors / np.maximum(np.linalg.norm(vectors, axis=1, keepdims=True), NORM_EPSILON)
     centered = normalized - normalized.mean(axis=0, keepdims=True)
     _, _, components = np.linalg.svd(centered, full_matrices=False)

@@ -12,21 +12,17 @@ from transformers import AutoModel
 
 from dinov3_pipeline.common.constants import (
     FEATURE_DTYPE,
-    LEGACY_MODEL_ALIASES,
+    HF_MODEL_IDS,
     MASK_FOREGROUND,
     PATCH_TOKENS_KEY,
     PRETRAIN_NORMALIZATION,
 )
-from dinov3_pipeline.common.file_hash import sha256_of_file
 from dinov3_pipeline.common.models import DataContractError, FeatureArtifact, ReadySample
 from dinov3_pipeline.data_loading.preprocessing import prepare_crop
 
 
-def _canonical_model_name(model_name: str) -> str:
-    return LEGACY_MODEL_ALIASES.get(model_name, model_name)
-
-
 def patch_tokens_to_hwc(patch_tokens: np.ndarray, grid_height: int, grid_width: int) -> np.ndarray:
+    """2D の patch token を HWC の空間マップに再配置する。"""
     if grid_height <= 0 or grid_width <= 0 or patch_tokens.ndim != 2:
         raise DataContractError("patch tokenには空でない2次元行列と正のgrid寸法が必要である")
     if patch_tokens.shape[0] != grid_height * grid_width or patch_tokens.shape[1] <= 0:
@@ -35,26 +31,25 @@ def patch_tokens_to_hwc(patch_tokens: np.ndarray, grid_height: int, grid_width: 
 
 
 class Dinov3FeatureExtractor:
+    """DINOv3 の patch token を抽出して、HWC の特徴量として保存する。"""
+
     def __init__(
         self,
-        repo_dir: Path | None,
         model_name: str,
-        weights_path: Path | None,
         pretrain_dataset: str,
         crop_size: int,
         device_name: str | None,
+        mask_rgb_background: bool = True,
     ) -> None:
-        normalized_model_name = _canonical_model_name(model_name)
-        if repo_dir is not None and str(repo_dir) and not Path(repo_dir).exists() and not normalized_model_name.startswith("facebook/"):
-            raise RuntimeError(f"DINOv3のリポジトリが見つからない: {repo_dir}")
-        if weights_path is not None and str(weights_path) and Path(weights_path).exists() is False and normalized_model_name.startswith("facebook/") is False:
-            raise RuntimeError(f"DINOv3の重みが見つからない: {weights_path}")
+        """公式モデルIDとdeviceを解決し、Transformersで読み込む。"""
+        if model_name not in HF_MODEL_IDS:
+            raise ValueError(f"model_nameは公式Hugging Face IDのいずれかである必要がある: {model_name}")
 
         self._torch = torch
         self.model_name = model_name
-        self.model_id = normalized_model_name
+        self.model_id = model_name
         self.crop_size = crop_size
-        self.weights_sha256 = sha256_of_file(weights_path) if weights_path is not None and Path(weights_path).is_file() else ""
+        self.mask_rgb_background = mask_rgb_background
         self._mean_std = PRETRAIN_NORMALIZATION[pretrain_dataset]
         self.device = torch.device(device_name or ("cuda" if torch.cuda.is_available() else "cpu"))
 
@@ -75,13 +70,17 @@ class Dinov3FeatureExtractor:
             raise ValueError(f"モデルのlayer数が検出できない: {self.model_id}")
 
     def extract(self, sample: ReadySample, destination: Path) -> FeatureArtifact:
-        cropped = prepare_crop(sample, self.crop_size)
+        """1 sample を前処理し、最終層および中間層の特徴量を保存する。"""
+        cropped = prepare_crop(sample, self.crop_size, mask_rgb_background=self.mask_rgb_background)
         pixels = np.asarray(cropped.rgb, dtype=np.float32) / MASK_FOREGROUND
         tensor = self._torch.from_numpy(pixels).permute(2, 0, 1)
         mean = self._torch.tensor(self._mean_std[0], dtype=tensor.dtype).view(3, 1, 1)
         std = self._torch.tensor(self._mean_std[1], dtype=tensor.dtype).view(3, 1, 1)
         mask = self._torch.from_numpy(np.asarray(cropped.mask, dtype=np.float32) / MASK_FOREGROUND)
-        batch = (((tensor - mean) / std) * mask.unsqueeze(0)).unsqueeze(0).to(self.device)
+        normalized = (tensor - mean) / std
+        if self.mask_rgb_background:
+            normalized = normalized * mask.unsqueeze(0)
+        batch = normalized.unsqueeze(0).to(self.device)
 
         with self._torch.inference_mode():
             grid = self.crop_size // self.patch_size
@@ -103,7 +102,6 @@ class Dinov3FeatureExtractor:
             shape=(int(features.shape[0]), int(features.shape[1]), int(features.shape[2])),
             dtype=str(features.dtype),
             model_name=self.model_name,
-            weights_sha256=self.weights_sha256,
             block_paths=tuple(block_paths),
         )
 
@@ -114,13 +112,8 @@ class Dinov3FeatureExtractor:
         if hidden_states is None or final_hidden_state is None:
             raise DataContractError("Transformersのhidden_statesとlast_hidden_stateが必要である")
         if len(hidden_states) != self.num_layers + 1:
-            raise DataContractError(
-                f"hidden_statesはembedding入力と{self.num_layers}個のBlock出力が必要だが、{len(hidden_states)}個である"
-            )
-        selected = [
-            self._patch_tokens(hidden_states[index], grid)
-            for index in self._layer_indices()
-        ]
+            raise DataContractError(f"hidden_statesはembedding入力と{self.num_layers}個のBlock出力が必要だが、{len(hidden_states)}個である")
+        selected = [self._patch_tokens(hidden_states[index], grid) for index in self._layer_indices()]
         return selected, self._patch_tokens(final_hidden_state, grid)
 
     def _patch_tokens(self, output: torch.Tensor, grid: int) -> torch.Tensor:
@@ -133,10 +126,7 @@ class Dinov3FeatureExtractor:
         token_count = output.shape[0]
         special_token_count = self._special_token_count()
         if token_count != special_token_count + patch_count:
-            raise DataContractError(
-                f"special token数を除いたpatch tokenは{patch_count}個必要だが、"
-                f"出力{token_count}個、モデルのspecial token数{special_token_count}個である"
-            )
+            raise DataContractError(f"special token数を除いたpatch tokenは{patch_count}個必要だが、出力{token_count}個、モデルのspecial token数{special_token_count}個である")
         return output[special_token_count:]
 
     def _special_token_count(self) -> int:

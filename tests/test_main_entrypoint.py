@@ -7,9 +7,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+import main
 from dinov3_pipeline.common.models import FeatureArtifact
-from dinov3_pipeline.entrypoints import deliver
-from dinov3_pipeline.saving import delivery_exporter
+from dinov3_pipeline.saving import cnn_bundle_exporter
 from dinov3_pipeline.settings import load_settings
 
 
@@ -30,7 +30,6 @@ class ArrayExtractor:
             (2, 2, 4),
             "float32",
             "dinov3_test",
-            "weights-1",
             tuple(block_paths),
         )
 
@@ -48,8 +47,8 @@ def delivery_root(
         crop_size=64,
         dataset_version=None,
     )
-    monkeypatch.setattr(deliver, "load_settings", lambda: settings)
-    monkeypatch.setattr(deliver, "Dinov3FeatureExtractor", ArrayExtractor)
+    monkeypatch.setattr(main, "load_settings", lambda: settings)
+    monkeypatch.setattr(main, "Dinov3FeatureExtractor", ArrayExtractor)
     return root
 
 
@@ -63,10 +62,10 @@ def _assert_version_outputs(root: Path, version: str) -> None:
 
 
 def test_main_repeated_runs_use_same_version_everywhere_without_overwriting(delivery_root: Path, caplog: pytest.LogCaptureFixture) -> None:
-    caplog.set_level(logging.INFO, logger=deliver.__name__)
-    assert deliver.main() == 0
+    caplog.set_level(logging.INFO, logger=main.__name__)
+    assert main.main() == 0
     first_files = {path: path.read_bytes() for path in delivery_root.rglob("*") if path.is_file()}
-    assert deliver.main() == 0
+    assert main.main() == 0
     for version in ("capture_v001", "capture_v002"):
         _assert_version_outputs(delivery_root, version)
         assert f"delivery {version}:" in caplog.text
@@ -77,12 +76,12 @@ def test_main_model_failure_consumes_version_without_publishing(delivery_root: P
     def fail(*args: object) -> None:
         raise RuntimeError("model failed")
 
-    monkeypatch.setattr(deliver, "Dinov3FeatureExtractor", fail)
-    assert deliver.main() == 2
+    monkeypatch.setattr(main, "Dinov3FeatureExtractor", fail)
+    assert main.main() == 2
     assert (delivery_root / ".dataset_versions" / "capture_v001").is_dir()
     assert not (delivery_root / "cnn").exists()
-    monkeypatch.setattr(deliver, "Dinov3FeatureExtractor", ArrayExtractor)
-    assert deliver.main() == 0
+    monkeypatch.setattr(main, "Dinov3FeatureExtractor", ArrayExtractor)
+    assert main.main() == 0
     _assert_version_outputs(delivery_root, "capture_v002")
 
 
@@ -91,12 +90,12 @@ def test_main_export_failure_never_publishes_incomplete_cnn(delivery_root: Path,
         raise RuntimeError("database write failed")
 
     with monkeypatch.context() as patch:
-        patch.setattr(delivery_exporter, "_write_database", fail)
-        assert deliver.main() == 2
+        patch.setattr(cnn_bundle_exporter, "_write_database", fail)
+        assert main.main() == 2
     assert not (delivery_root / "cnn").exists()
     assert not (delivery_root / "debug").exists()
     assert not list(delivery_root.glob(".capture_v001-*"))
-    assert deliver.main() == 0
+    assert main.main() == 0
     _assert_version_outputs(delivery_root, "capture_v002")
 
 
@@ -111,22 +110,22 @@ def test_main_no_inputs_does_not_reserve_or_load_model(
     def unexpected(*args: object) -> None:
         pytest.fail("入力なしでモデルを読み込んだ")
 
-    monkeypatch.setattr(deliver, "Dinov3FeatureExtractor", unexpected)
-    assert deliver.main() == 2
+    monkeypatch.setattr(main, "Dinov3FeatureExtractor", unexpected)
+    assert main.main() == 2
     assert not delivery_root.exists()
 
 
 def test_main_explicit_version_is_preserved_and_duplicate_rejected_before_model(delivery_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    settings = deliver.load_settings().model_copy(update={"dataset_version": "legacy"})
-    monkeypatch.setattr(deliver, "load_settings", lambda: settings)
-    assert deliver.main() == 0
+    settings = main.load_settings().model_copy(update={"dataset_version": "legacy"})
+    monkeypatch.setattr(main, "load_settings", lambda: settings)
+    assert main.main() == 0
     _assert_version_outputs(delivery_root, "legacy")
 
     def unexpected(*args: object) -> None:
         pytest.fail("使用済みversionでモデルを読み込んだ")
 
-    monkeypatch.setattr(deliver, "Dinov3FeatureExtractor", unexpected)
-    assert deliver.main() == 2
+    monkeypatch.setattr(main, "Dinov3FeatureExtractor", unexpected)
+    assert main.main() == 2
     _assert_version_outputs(delivery_root, "legacy")
 
 
@@ -151,16 +150,16 @@ def test_main_protects_debug_only_versions(
     existing.parent.mkdir(parents=True)
     existing.write_bytes(b"unchanged")
     if explicit:
-        settings = deliver.load_settings().model_copy(update={"dataset_version": version})
-        monkeypatch.setattr(deliver, "load_settings", lambda: settings)
+        settings = main.load_settings().model_copy(update={"dataset_version": version})
+        monkeypatch.setattr(main, "load_settings", lambda: settings)
 
         def unexpected(*args: object) -> None:
             pytest.fail("使用済みdebug versionでモデルを読み込んだ")
 
-        monkeypatch.setattr(deliver, "Dinov3FeatureExtractor", unexpected)
-        assert deliver.main() == 2
+        monkeypatch.setattr(main, "Dinov3FeatureExtractor", unexpected)
+        assert main.main() == 2
         assert not (delivery_root / "cnn").exists()
     else:
-        assert deliver.main() == 0
+        assert main.main() == 0
         _assert_version_outputs(delivery_root, "capture_v008")
     assert existing.read_bytes() == b"unchanged"

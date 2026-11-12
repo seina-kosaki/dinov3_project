@@ -1,13 +1,13 @@
 """抽出から公開までの流れ（usecase）を、ダミー抽出器で確認する。
 
 責務:
-    run_delivery が、承認済み物体を抽出・再検証し、失効した物体を出力しないことを確認する。
+    process_approved_samples が、承認済み物体を抽出・再検証し、失効した物体を出力しないことを確認する。
 
 処理の流れ:
     実際のsession DBとRepositoryを使い、モデルだけをダミー抽出器に差し替えて実行する。
 
 関連ファイル:
-    src/dinov3_pipeline/usecase/delivery.py、src/dinov3_pipeline/domain/ports.py、tests/conftest.py。
+    src/dinov3_pipeline/usecase/sample_processing.py、src/dinov3_pipeline/domain/ports.py、tests/conftest.py。
 
 設計意図:
     GPUやHugging Face認証を使わずに、抽出前後の承認再確認という安全契約を確認する。
@@ -31,7 +31,7 @@ from dinov3_pipeline.common.models import (
 )
 from dinov3_pipeline.data_loading.preprocessing import prepare_crop
 from dinov3_pipeline.data_loading.session_repository import SessionSam3Repository
-from dinov3_pipeline.usecase.delivery import run_delivery
+from dinov3_pipeline.usecase.sample_processing import process_approved_samples
 
 CROP_SIZE = 64
 VERSION = "capture_v001"
@@ -81,7 +81,6 @@ class ArrayExtractor:
             (2, 2, 4),
             "float32",
             "dinov3_test",
-            "weights-1",
             tuple(block_paths),
         )
 
@@ -104,7 +103,7 @@ def _revoke(database_path: Path) -> Callable[[], None]:
     return revoke
 
 
-def test_run_delivery_ready_sample_completes_all_samples(
+def test_process_approved_samples_ready_sample_completes_all_samples(
     session_root: tuple[Path, Path], tmp_path: Path
 ) -> None:
     """承認済み物体を全件完了する。"""
@@ -113,7 +112,7 @@ def test_run_delivery_ready_sample_completes_all_samples(
     repository = SessionSam3Repository(root, TIMEOUT_SECONDS)
 
     # 実行
-    summary = run_delivery(
+    summary = process_approved_samples(
         repository.load_ready_samples(),
         repository,
         ArrayExtractor(),
@@ -130,7 +129,7 @@ def test_run_delivery_ready_sample_completes_all_samples(
     ) == (1, 1, ())
 
 
-def test_run_delivery_ready_sample_publishes_cnn_metadata(
+def test_process_approved_samples_ready_sample_publishes_cnn_metadata(
     session_root: tuple[Path, Path], tmp_path: Path
 ) -> None:
     """CNN bundleのmetadata SQLiteを公開する。"""
@@ -139,7 +138,7 @@ def test_run_delivery_ready_sample_publishes_cnn_metadata(
     repository = SessionSam3Repository(root, TIMEOUT_SECONDS)
 
     # 実行
-    summary = run_delivery(
+    summary = process_approved_samples(
         repository.load_ready_samples(),
         repository,
         ArrayExtractor(),
@@ -152,7 +151,7 @@ def test_run_delivery_ready_sample_publishes_cnn_metadata(
     assert (summary.output.cnn_path / "metadata.sqlite3").is_file()
 
 
-def test_run_delivery_revoked_during_extraction_raises_without_publishing(
+def test_process_approved_samples_revoked_during_extraction_raises_without_publishing(
     session_root: tuple[Path, Path], tmp_path: Path
 ) -> None:
     """抽出中に承認が取り消された物体は、出力せずに拒否する。"""
@@ -164,7 +163,7 @@ def test_run_delivery_revoked_during_extraction_raises_without_publishing(
 
     # 実行・検証
     with pytest.raises(DataContractError, match="全てのready sample"):
-        run_delivery(
+        process_approved_samples(
             repository.load_ready_samples(),
             repository,
             extractor,
@@ -175,7 +174,7 @@ def test_run_delivery_revoked_during_extraction_raises_without_publishing(
     assert not (delivery_root / "cnn").exists()
 
 
-def test_run_delivery_no_samples_raises_contract_error(
+def test_process_approved_samples_no_samples_raises_contract_error(
     session_root: tuple[Path, Path], tmp_path: Path
 ) -> None:
     """承認済み物体が無い場合は拒否する。"""
@@ -184,7 +183,7 @@ def test_run_delivery_no_samples_raises_contract_error(
 
     # 実行・検証
     with pytest.raises(DataContractError, match="有効なsampleがない"):
-        run_delivery(
+        process_approved_samples(
             SampleLoadResult((), ()),
             repository,
             ArrayExtractor(),
@@ -194,7 +193,7 @@ def test_run_delivery_no_samples_raises_contract_error(
         )
 
 
-def test_run_delivery_crop_failure_logs_once_and_excludes_sample(
+def test_process_approved_samples_crop_failure_logs_once_and_excludes_sample(
     session_root: tuple[Path, Path],
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
@@ -213,13 +212,13 @@ def test_run_delivery_crop_failure_logs_once_and_excludes_sample(
             return super().extract(sample, destination)
 
     with caplog.at_level(logging.ERROR), pytest.raises(DataContractError, match="全てのready sample"):
-        run_delivery(
+        process_approved_samples(
             repository.load_ready_samples(), repository, CropExtractor(),
             tmp_path / "delivery", crop_size, VERSION,
         )
     assert len(caplog.records) == 1
     record = caplog.records[0]
-    assert record.name == "dinov3_pipeline.usecase.delivery"
+    assert record.name == "dinov3_pipeline.usecase.sample_processing"
     assert record.exc_info is not None
     assert isinstance(record.exc_info[1], DataContractError)
     assert "crop_size=32, foreground_width=64, foreground_height=64" in caplog.text

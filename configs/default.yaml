@@ -5,21 +5,24 @@ data_root: ../../shared_data
 delivery_root: ../../dinov3_delivery
 # dataset_version省略時はcapture_v001から連番で自動採番する。明示指定は未使用名のみ可。
 
-# 変更後の既定値は Hugging Face model ID。clone / torch.hub 由来の旧設定は使わない。
-repo_dir: ../third_party/dinov3
-# 公式のモデルID: facebook/dinov3-vits16-pretrain-lvd1689m / ... / facebook/dinov3-vit7b16-pretrain-lvd1689m
-# 期待hidden size: 384 / 384 / 768 / 1024 / 1280 / 4096
+# 公式Hugging FaceモデルIDと期待hidden size（順に384, 384, 768, 1024, 1280, 4096）
+# facebook/dinov3-vits16-pretrain-lvd1689m
+# facebook/dinov3-vits16plus-pretrain-lvd1689m
+# facebook/dinov3-vitb16-pretrain-lvd1689m
+# facebook/dinov3-vitl16-pretrain-lvd1689m
+# facebook/dinov3-vith16plus-pretrain-lvd1689m
+# facebook/dinov3-vit7b16-pretrain-lvd1689m
 model_name: facebook/dinov3-vits16-pretrain-lvd1689m
-# 旧来の重みパスは未使用。Transformers/Hugging Face Hubの標準キャッシュ/認証を使用する。
-weights_path: ../weights/dinov3_vits16_pretrain_lvd1689m-08c60483.pth
 # 重みの事前学習データ。正規化統計の選択に使う（lvd1689m / sat493m）
 pretrain_dataset: lvd1689m
 
-# PyTorch device string（cuda:0 / cpuなど）。nullはCUDA利用可ならCUDA、それ以外CPUを自動選択
-device: null
+# PyTorch device string（cuda:0 / cpuなど）。# null: 自動選択 / "cuda:0": GPU 0 / "cpu": CPU
+device: cuda:0
 # RGB・depth・mask共通の正方形crop辺長（px）。実測ready maskの最大寸法(581x577)を収め、patch size 16で割り切れる値
 crop_size: 672
 # true: depthのmask外を0にする / false: crop内のdepth生値をそのまま保存する
 mask_depth: false
+# RGB crop・DINO入力・PCA可視化でmaskによる背景除去を行うかどうか
+mask_rgb_background: true
 # 入力SQLiteのlock待機秒数（正数）
 sqlite_timeout_seconds: 10.0

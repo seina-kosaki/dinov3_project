@@ -2,6 +2,8 @@
 
 > 新規debugはcapture単位の階層へ出力し、採番・重複検出では新旧両階層を探索する。変更範囲と公開・失敗時の維持事項は[受け渡し仕様のDebug節](cnn_delivery_handoff.md#debug)を参照する。それ以外の命名・予約規則は従来どおり。
 
+モデル設定・重みhashの変更後も、既存データ保護のため、この新旧debug階層を含むversion重複検出は維持する。
+
 ## 目的
 
 通常実行のたびに `dataset_version` を手動指定する負担をなくし、各実行の出力を固有のversion名で保存する。既存の抽出・検証・成果物形式は変更対象としない。
@@ -47,7 +49,7 @@
 ## 制約・責務
 
 - debugの配置以外は、抽出内容、CNN/debugのファイル形式・画像内容、入力データの扱いを変更しない。version名の命名・予約方式も維持する。
-- `settings.py` は任意version設定の読み込み・検証、`entrypoints/deliver.py` は採番予約と実行の組み立て、`infrastructure/dataset_version.py` は既存名の探索と予約、`usecase/delivery.py` は確定versionの受け渡し、`infrastructure/delivery_exporter.py` はversion別成果物の書き出し・公開を担う。
+- `settings.py` は任意version設定の読み込み・検証、`src/main.py` は採番予約と実行の組み立て、`saving/dataset_version.py` は既存名の探索と予約、`usecase/sample_processing.py` は確定versionの受け渡し、`saving/cnn_bundle_exporter.py` はversion別成果物の書き出し・公開を担う。
 - 既存version directoryや関連成果物を置き換えない。
 
 ## 受け入れ条件

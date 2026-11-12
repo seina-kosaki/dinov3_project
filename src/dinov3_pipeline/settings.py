@@ -9,7 +9,7 @@
     パスは設定ファイルの位置を基準に絶対パスへ解決する。
 
 関連ファイル:
-    constants.py、configs/default.yaml、entrypoints/deliver.py。
+    constants.py、configs/default.yaml、src/main.py。
 
 設計意図:
     方針どおり pydantic-settings で読み込み、起点を引数なしで実行できるようにする。
@@ -20,7 +20,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from dotenv import load_dotenv
 from pydantic import Field, field_validator
 from pydantic_settings import (
     BaseSettings,
@@ -33,9 +32,7 @@ from dinov3_pipeline.common.constants import (
     CONFIG_DIR,
     DEFAULT_CONFIG_PATH,
     ENV_PREFIX,
-    LEGACY_MODEL_ALIASES,
     PRETRAIN_NORMALIZATION,
-    PROJECT_ROOT,
     SAFE_NAME_PATTERN,
     SUPPORTED_MODEL_NAMES,
 )
@@ -47,29 +44,28 @@ class Settings(BaseSettings):
     Note:
         dataset_version が None の場合、実行起点が入力取得後に連番を予約する。
         crop_size がモデルの patch size で割り切れるかは、モデル読込後に抽出器が検証する。
-        repo_dir と weights_path の存在も、抽出器がモデル読込時に確認する。
     """
 
     model_config = SettingsConfigDict(
         env_prefix=ENV_PREFIX,
         yaml_file=DEFAULT_CONFIG_PATH,
         yaml_file_encoding="utf-8",
+        extra="forbid",
         frozen=True,
     )
 
     data_root: Path
     delivery_root: Path
     dataset_version: str | None = Field(default=None, pattern=f"^{SAFE_NAME_PATTERN}$")
-    repo_dir: Path
     model_name: str
-    weights_path: Path
     pretrain_dataset: str
     device: str | None = None
     crop_size: int = Field(gt=0)
     mask_depth: bool
+    mask_rgb_background: bool
     sqlite_timeout_seconds: float = Field(gt=0)
 
-    @field_validator("data_root", "delivery_root", "repo_dir", "weights_path")
+    @field_validator("data_root", "delivery_root")
     @classmethod
     def _resolve_from_config_dir(cls, value: Path) -> Path:
         """相対パスを設定ディレクトリ基準の絶対パスへ解決する。
@@ -97,8 +93,7 @@ class Settings(BaseSettings):
         Raises:
             ValueError: 未対応のモデル名の場合。
         """
-        canonical = LEGACY_MODEL_ALIASES.get(value, value)
-        if value not in SUPPORTED_MODEL_NAMES and canonical not in SUPPORTED_MODEL_NAMES:
+        if value not in SUPPORTED_MODEL_NAMES:
             raise ValueError(f"model_nameは{SUPPORTED_MODEL_NAMES}のいずれかである必要がある: {value}")
         return value
 
@@ -156,5 +151,4 @@ def load_settings(**overrides: Any) -> Settings:
     Raises:
         pydantic.ValidationError: 設定値が不正な場合（ValueError のサブクラス）。
     """
-    load_dotenv(PROJECT_ROOT / ".env")
     return Settings(**overrides)

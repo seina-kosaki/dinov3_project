@@ -31,7 +31,7 @@ DINOv3から取得した5種類の特徴量をすべて可視化し、クロッ�
 
 ## 関連実装
 
-- `src/dinov3_pipeline/saving/delivery_exporter.py`: sample出力、PCA可視化の呼び出し、可視化エラーのissue記録。
+- `src/dinov3_pipeline/saving/cnn_bundle_exporter.py`: sample出力、PCA可視化の呼び出し、可視化エラーのissue記録。
 - `src/dinov3_pipeline/saving/pca_visualizer.py`: PCA-RGB可視化。
 - `src/dinov3_pipeline/dinov3/extractor.py`: 4つの中間層特徴量と最終特徴量の抽出。
 

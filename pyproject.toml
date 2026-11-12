@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [project.scripts]
-dinov3-pipeline = "dinov3_pipeline.entrypoints.deliver:main"
+dinov3-pipeline = "main:main"
 
 
 [[tool.uv.index]]
@@ -45,6 +45,10 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools]
+py-modules = ["main"]
+package-dir = {"" = "src"}
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

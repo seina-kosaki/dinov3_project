@@ -12,6 +12,8 @@ class DataContractError(ValueError):
 
 @dataclass(frozen=True)
 class ReadySample:
+    """承認済みの1サンプルに必要な識別情報とファイル境界を表す。"""
+
     sample_id: str
     capture_date: str
     session_id: str
@@ -27,28 +29,34 @@ class ReadySample:
     fingerprint: str
 
     def __post_init__(self) -> None:
+        """ID が欠落しているサンプルは作成時に拒否する。"""
         if not self.sample_id or not self.instrument_uid:
             raise DataContractError("sample_idとinstrument_uidは必須である")
 
 
 @dataclass(frozen=True)
 class SampleLoadResult:
+    """読み込みに成功したサンプル群と、処理対象外として記録された問題一覧。"""
+
     samples: tuple[ReadySample, ...]
     issues: tuple[str, ...]
 
 
 @dataclass(frozen=True)
 class FeatureArtifact:
+    """DINOv3 の特徴量ファイルと、その構成を説明するメタデータ。"""
+
     path: Path
     shape: tuple[int, int, int]
     dtype: str
     model_name: str
-    weights_sha256: str
-    block_paths: tuple[Path, Path, Path, Path]
+    block_paths: tuple[Path, ...]
 
 
 @dataclass(frozen=True)
 class DeliveryOutput:
+    """CNN bundle と debug 出力の生成結果を集約して返す。"""
+
     cnn_path: Path
     debug_path: Path
     exported_count: int

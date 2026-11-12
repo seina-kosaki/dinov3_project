@@ -69,16 +69,7 @@ HF_MODEL_IDS = (
     "facebook/dinov3-vith16plus-pretrain-lvd1689m",
     "facebook/dinov3-vit7b16-pretrain-lvd1689m",
 )
-LEGACY_MODEL_ALIASES = {
-    "dinov3_vits16": "facebook/dinov3-vits16-pretrain-lvd1689m",
-    "dinov3_vits16plus": "facebook/dinov3-vits16plus-pretrain-lvd1689m",
-    "dinov3_vitb16": "facebook/dinov3-vitb16-pretrain-lvd1689m",
-    "dinov3_vitl16": "facebook/dinov3-vitl16-pretrain-lvd1689m",
-    "dinov3_vitl16plus": "facebook/dinov3-vitl16-pretrain-lvd1689m",
-    "dinov3_vith16plus": "facebook/dinov3-vith16plus-pretrain-lvd1689m",
-    "dinov3_vit7b16": "facebook/dinov3-vit7b16-pretrain-lvd1689m",
-}
-SUPPORTED_MODEL_NAMES = HF_MODEL_IDS + tuple(LEGACY_MODEL_ALIASES)
+SUPPORTED_MODEL_NAMES = HF_MODEL_IDS
 
 HUB_SOURCE = "hf"
 PATCH_TOKENS_KEY = "x_norm_patchtokens"

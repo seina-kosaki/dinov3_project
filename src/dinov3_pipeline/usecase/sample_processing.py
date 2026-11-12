@@ -8,11 +8,11 @@
     1. 物体ごとに承認状態と原本を検証する。
     2. 特徴量を抽出する。
     3. 抽出中の取消・改変を検出するため、もう一度検証する。
-    4. 成功した物体を export_delivery で公開する。
+    4. 成功した物体を export_cnn_bundle で公開する。
 
 関連ファイル:
-    infrastructure/session_repository.py、infrastructure/delivery_exporter.py、
-    domain/ports.py、entrypoints/deliver.py。
+    data_loading/session_repository.py、saving/cnn_bundle_exporter.py、
+    common/ports.py、main.py。
 
 設計意図:
     1物体の失敗で全体を止めず、理由を記録して続行する。承認の取消が抽出中に起きても、
@@ -37,7 +37,7 @@ from dinov3_pipeline.common.models import (
 )
 from dinov3_pipeline.common.ports import FeatureExtractor
 from dinov3_pipeline.data_loading.session_repository import SessionSam3Repository
-from dinov3_pipeline.saving.delivery_exporter import export_delivery
+from dinov3_pipeline.saving.cnn_bundle_exporter import export_cnn_bundle
 
 LOGGER = logging.getLogger(__name__)
 
@@ -52,7 +52,7 @@ class DeliverySummary:
     failed_sample_ids: tuple[str, ...]
 
 
-def run_delivery(
+def process_approved_samples(
     loaded: SampleLoadResult,
     repository: SessionSam3Repository,
     extractor: FeatureExtractor,
@@ -60,6 +60,7 @@ def run_delivery(
     crop_size: int,
     dataset_version: str,
     mask_depth: bool = True,
+    mask_rgb_background: bool = True,
 ) -> DeliverySummary:
     """承認済み物体から特徴量を抽出し、CNN bundleとdebugを公開する。
 
@@ -71,6 +72,7 @@ def run_delivery(
         crop_size: crop辺長。
         dataset_version: 出力version。
         mask_depth: Trueならdepthのmask外を0にし、Falseならcrop内の生値を保存する。
+        mask_rgb_background: TrueならRGBのmask外を0にし、DINO入力とPCAも前景に限定する。
 
     Returns:
         公開結果と、対象・完了・失敗の件数。
@@ -86,7 +88,7 @@ def run_delivery(
     records: list[tuple[ReadySample, FeatureArtifact]] = []
     issues = list(loaded.issues)
     failed: list[str] = []
-    # 抽出途中の特徴量は一時領域へ置き、公開は export_delivery だけに任せる
+    # 抽出途中の特徴量は一時領域へ置き、公開はexporterだけに任せる
     with tempfile.TemporaryDirectory(
         prefix=f"{dataset_version}-", dir=staging_root
     ) as temporary:
@@ -110,8 +112,14 @@ def run_delivery(
 
         if not records:
             raise DataContractError("全てのready sampleでDINO抽出に失敗した")
-        output = export_delivery(
-            delivery_root, crop_size, dataset_version, records, issues, mask_depth
+        output = export_cnn_bundle(
+            delivery_root,
+            crop_size,
+            dataset_version,
+            records,
+            issues,
+            mask_depth,
+            mask_rgb_background,
         )
 
     return DeliverySummary(

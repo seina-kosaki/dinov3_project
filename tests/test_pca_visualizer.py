@@ -30,7 +30,7 @@ RGB_COLOR = (100, 120, 140)
 
 def _write_inputs(
     tmp_path: Path, mask_value: int, grid: int
-) -> tuple[Path, Path, Path]:
+) -> tuple[tuple[Path, ...], Path, Path]:
     """特徴量・RGB・maskを書き出す。
 
     Args:
@@ -41,46 +41,36 @@ def _write_inputs(
     Returns:
         特徴量・RGB・maskのパス。
     """
-    feature_path = tmp_path / "feature.npy"
+    feature_paths = tuple(tmp_path / f"feature_{index}.npy" for index in range(5))
     rgb_path = tmp_path / "rgb.png"
     mask_path = tmp_path / "mask.png"
-    features = np.arange(grid * grid * 5, dtype=np.float32).reshape(grid, grid, 5)
-    np.save(feature_path, features, allow_pickle=False)
+    for index, feature_path in enumerate(feature_paths):
+        features = np.arange(grid * grid * 5, dtype=np.float32).reshape(grid, grid, 5) + index
+        np.save(feature_path, features, allow_pickle=False)
     Image.new("RGB", (IMAGE_SIZE, IMAGE_SIZE), RGB_COLOR).save(rgb_path)
     Image.new("L", (IMAGE_SIZE, IMAGE_SIZE), mask_value).save(mask_path)
-    return feature_path, rgb_path, mask_path
+    return feature_paths, rgb_path, mask_path
 
 
-def test_save_pca_visualization_foreground_exists_writes_side_by_side_png(
-    tmp_path: Path,
+def test_save_pca_visualization_foreground_exists_writes_six_panels_in_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """crop RGBとPCA画像を横に並べたPNGを保存する。"""
-    # 準備
-    feature_path, rgb_path, mask_path = _write_inputs(tmp_path, mask_value=255, grid=4)
+    """RGBと5特徴量の可視化を指定順で3列×2行に配置する。"""
+    feature_paths, rgb_path, mask_path = _write_inputs(tmp_path, mask_value=255, grid=4)
     destination = tmp_path / "debug" / "pca.png"
-
-    # 実行
-    save_pca_visualization(feature_path, rgb_path, mask_path, destination)
-
-    # 検証
+    colors = iter([(20, 0, 0), (40, 0, 0), (60, 0, 0), (80, 0, 0), (100, 0, 0)])
+    monkeypatch.setattr(
+        "dinov3_pipeline.saving.pca_visualizer._pca_colors",
+        lambda vectors: np.tile(next(colors), (len(vectors), 1)).astype(np.uint8),
+    )
+    save_pca_visualization(feature_paths, rgb_path, mask_path, destination)
     with Image.open(destination) as output:
-        assert output.size == (IMAGE_SIZE * 2, IMAGE_SIZE)
-
-
-def test_save_pca_visualization_foreground_exists_keeps_rgb_on_left(
-    tmp_path: Path,
-) -> None:
-    """左半分にcrop RGBをそのまま置く。"""
-    # 準備
-    feature_path, rgb_path, mask_path = _write_inputs(tmp_path, mask_value=255, grid=4)
-    destination = tmp_path / "pca.png"
-
-    # 実行
-    save_pca_visualization(feature_path, rgb_path, mask_path, destination)
-
-    # 検証
-    with Image.open(destination) as output:
+        assert output.size == (IMAGE_SIZE * 3, IMAGE_SIZE * 2)
         assert output.getpixel((0, 0)) == RGB_COLOR
+        assert [
+            output.getpixel(((index % 3) * IMAGE_SIZE, (index // 3) * IMAGE_SIZE))
+            for index in range(1, 6)
+        ] == [(20, 0, 0), (40, 0, 0), (60, 0, 0), (80, 0, 0), (100, 0, 0)]
 
 
 def test_save_pca_visualization_foreground_too_small_raises_contract_error(
@@ -88,8 +78,29 @@ def test_save_pca_visualization_foreground_too_small_raises_contract_error(
 ) -> None:
     """前景patchが3個未満ならPCAを実行せず拒否する。"""
     # 準備
-    feature_path, rgb_path, mask_path = _write_inputs(tmp_path, mask_value=0, grid=2)
+    feature_paths, rgb_path, mask_path = _write_inputs(tmp_path, mask_value=0, grid=2)
 
     # 実行・検証
     with pytest.raises(DataContractError, match="前景patch"):
-        save_pca_visualization(feature_path, rgb_path, mask_path, tmp_path / "pca.png")
+        save_pca_visualization(feature_paths, rgb_path, mask_path, tmp_path / "pca.png")
+
+
+def test_save_pca_visualization_failure_does_not_save_partial_panels(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """どれかの特徴量でPCAが失敗した場合、部分画像を保存しない。"""
+    feature_paths, rgb_path, mask_path = _write_inputs(tmp_path, mask_value=255, grid=4)
+    destination = tmp_path / "pca.png"
+    calls = 0
+
+    def fail_on_second_feature(vectors: np.ndarray) -> np.ndarray:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise DataContractError("PCA failed")
+        return np.zeros((len(vectors), 3), dtype=np.uint8)
+
+    monkeypatch.setattr("dinov3_pipeline.saving.pca_visualizer._pca_colors", fail_on_second_feature)
+    with pytest.raises(DataContractError, match="PCA failed"):
+        save_pca_visualization(feature_paths, rgb_path, mask_path, destination)
+    assert not destination.exists()

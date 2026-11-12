@@ -164,7 +164,7 @@ def _write_samples(
             debug_dir = PurePosixPath(dataset_version) / sample.capture_date / sample.session_id
             try:
                 save_pca_visualization(
-                    bundle / feature,
+                    tuple(bundle / path for path in (*feature_blocks, feature)),
                     bundle / rgb,
                     bundle / mask,
                     debug / debug_dir / PCA_DIR / f"{key}{IMAGE_SUFFIX}",

@@ -296,13 +296,16 @@ def test_export_delivery_valid_sample_copies_feature_npy_unchanged(
 def test_export_delivery_valid_sample_writes_pca_under_date_and_session(
     delivered: Delivered,
 ) -> None:
-    """PCA画像を debug/<version>/<日付>/<session>/pca_rgb に保存する。"""
+    """5つのPCA-RGB画像とcrop RGBを debug/<version>/<日付>/<session>/pca_rgb に保存する。"""
     # 準備・実行
     pca_dir = delivered.output.debug_path / VERSION / "2026-10-30" / "session-001" / "pca_rgb"
 
     # 検証
     key = hashlib.sha256(delivered.sample.sample_id.encode("utf-8")).hexdigest()
-    assert [path.name for path in pca_dir.glob("*.png")] == [f"{key}.png"]
+    pca_path = pca_dir / f"{key}.png"
+    assert [path.name for path in pca_dir.glob("*.png")] == [pca_path.name]
+    with Image.open(pca_path) as pca:
+        assert pca.size == (CROP_SIZE * 3, CROP_SIZE * 2)
 
 
 def test_export_delivery_valid_sample_writes_issues_csv(delivered: Delivered) -> None:
@@ -500,7 +503,10 @@ def test_export_delivery_multiple_dates_and_sessions_publish_in_sorted_order(mak
         pca = root / "debug" / VERSION / item.capture_date / item.session_id / "pca_rgb" / f"{key}.png"
         expected = tmp_path / f"expected-{key}.png"
         delivery_exporter.save_pca_visualization(
-            output.cnn_path / "features" / f"{key}.npy",
+            tuple(
+                output.cnn_path / f"feature_block_{index}" / f"{key}.npy"
+                for index in range(1, 5)
+            ) + (output.cnn_path / "features" / f"{key}.npy",),
             output.cnn_path / "rgb" / f"{key}.png",
             output.cnn_path / "masks" / f"{key}.png",
             expected,

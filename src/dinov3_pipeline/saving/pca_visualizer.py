@@ -23,36 +23,39 @@ from dinov3_pipeline.common.models import DataContractError
 
 
 def save_pca_visualization(
-    feature_path: Path,
+    feature_paths: tuple[Path, ...],
     rgb_path: Path,
     mask_path: Path,
     destination: Path,
 ) -> None:
-    features = np.load(feature_path, allow_pickle=False)
-    if (
-        features.ndim != FEATURE_NDIM
-        or features.shape[2] < PCA_COMPONENTS
-        or features.dtype != np.dtype(FEATURE_DTYPE)
-    ):
-        raise DataContractError("PCA可視化にはfloat32 HWC特徴量が必要である")
-
-    grid_height, grid_width, channels = features.shape
-    valid = _foreground_patches(mask_path, grid_height, grid_width)
-    vectors = features.reshape(-1, channels)[valid]
-    if len(vectors) < PCA_COMPONENTS:
-        raise DataContractError(f"PCA可視化に必要な前景patchが{PCA_COMPONENTS}個未満である")
-
-    colors = _pca_colors(vectors)
-    grid = np.zeros((grid_height * grid_width, PCA_COMPONENTS), dtype=np.uint8)
-    grid[valid] = colors
-    pca_image = Image.fromarray(grid.reshape(grid_height, grid_width, PCA_COMPONENTS), mode="RGB")
-
     with Image.open(rgb_path) as source:
         rgb = source.convert("RGB")
-    pca_image = pca_image.resize(rgb.size, Image.Resampling.NEAREST)
-    comparison = Image.new("RGB", (rgb.width * 2, rgb.height), RGB_BACKGROUND)
-    comparison.paste(rgb, (0, 0))
-    comparison.paste(pca_image, (rgb.width, 0))
+
+    panels = [rgb]
+    for feature_path in feature_paths:
+        features = np.load(feature_path, allow_pickle=False)
+        if (
+            features.ndim != FEATURE_NDIM
+            or features.shape[2] < PCA_COMPONENTS
+            or features.dtype != np.dtype(FEATURE_DTYPE)
+        ):
+            raise DataContractError("PCA可視化にはfloat32 HWC特徴量が必要である")
+
+        grid_height, grid_width, channels = features.shape
+        valid = _foreground_patches(mask_path, grid_height, grid_width)
+        vectors = features.reshape(-1, channels)[valid]
+        if len(vectors) < PCA_COMPONENTS:
+            raise DataContractError(f"PCA可視化に必要な前景patchが{PCA_COMPONENTS}個未満である")
+
+        colors = _pca_colors(vectors)
+        grid = np.zeros((grid_height * grid_width, PCA_COMPONENTS), dtype=np.uint8)
+        grid[valid] = colors
+        pca_image = Image.fromarray(grid.reshape(grid_height, grid_width, PCA_COMPONENTS), mode="RGB")
+        panels.append(pca_image.resize(rgb.size, Image.Resampling.NEAREST))
+
+    comparison = Image.new("RGB", (rgb.width * 3, rgb.height * 2), RGB_BACKGROUND)
+    for index, panel in enumerate(panels):
+        comparison.paste(panel, ((index % 3) * rgb.width, (index // 3) * rgb.height))
     destination.parent.mkdir(parents=True, exist_ok=True)
     comparison.save(destination, format=IMAGE_FORMAT)
 

@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
+
 
 class DataContractError(ValueError):
     """境界で不正入力を拒否する例外。"""
@@ -43,14 +45,16 @@ class SampleLoadResult:
 
 
 @dataclass(frozen=True)
-class FeatureArtifact:
-    """DINOv3 の特徴量ファイルと、その構成を説明するメタデータ。"""
+class FeatureSet:
+    """DINOv3が返す特徴量と生成モデルをまとめる。
 
-    path: Path
-    shape: tuple[int, int, int]
-    dtype: str
+    Attributes:
+        features: 特徴層名をkey、HWCのNumPy配列をvalueとする辞書。
+        model_name: 特徴量を生成したモデルID。
+    """
+
+    features: dict[str, np.ndarray]
     model_name: str
-    block_paths: tuple[Path, ...]
 
 
 @dataclass(frozen=True)

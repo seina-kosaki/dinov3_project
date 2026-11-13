@@ -21,21 +21,19 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from dinov3_pipeline.common.constants import FEATURE_SUFFIX, STAGING_DIR
 from dinov3_pipeline.common.models import (
     DataContractError,
     DeliveryOutput,
-    FeatureArtifact,
+    FeatureSet,
     ReadySample,
     SampleLoadResult,
 )
 from dinov3_pipeline.common.ports import FeatureExtractor
+from dinov3_pipeline.data_loading.preprocessing import CroppedInputs, prepare_crop
 from dinov3_pipeline.data_loading.session_repository import SessionSam3Repository
 from dinov3_pipeline.saving.cnn_bundle_exporter import export_cnn_bundle
 
@@ -58,6 +56,8 @@ def process_approved_samples(
     extractor: FeatureExtractor,
     delivery_root: Path,
     crop_size: int,
+    # 学習メモ: `*`より後ろは名前付きで渡す。位置引数でも書けるが、設定値の取り違えを防ぐ。
+    *,
     dataset_version: str,
     mask_depth: bool = True,
     mask_rgb_background: bool = True,
@@ -83,44 +83,36 @@ def process_approved_samples(
     if not loaded.samples:
         raise DataContractError("is_dino_ready=1の有効なsampleがない")
 
-    staging_root = Path(delivery_root) / STAGING_DIR
-    staging_root.mkdir(parents=True, exist_ok=True)
-    records: list[tuple[ReadySample, FeatureArtifact]] = []
+    records: list[tuple[ReadySample, CroppedInputs, FeatureSet]] = []
     issues = list(loaded.issues)
     failed: list[str] = []
-    # 抽出途中の特徴量は一時領域へ置き、公開はexporterだけに任せる
-    with tempfile.TemporaryDirectory(
-        prefix=f"{dataset_version}-", dir=staging_root
-    ) as temporary:
-        for sample in loaded.samples:
-            key = hashlib.sha256(sample.sample_id.encode("utf-8")).hexdigest()
-            try:
-                repository.validate_sample(sample)
-                artifact = extractor.extract(
-                    sample, Path(temporary) / f"{key}{FEATURE_SUFFIX}"
-                )
-                # 抽出中に承認が取り消された物体を、古い承認のまま出力しない
-                repository.validate_sample(sample)
-                records.append((sample, artifact))
-            except Exception as error:
-                # 1物体の失敗で全体を止めないため、種類を問わず理由を記録して続行する
-                LOGGER.exception("sample %sの抽出に失敗した", sample.sample_id)
-                issues.append(
-                    f"{sample.session_id}/{sample.image_id}: DINO抽出: {error}"
-                )
-                failed.append(sample.sample_id)
+    for sample in loaded.samples:
+        try:
+            repository.validate_sample(sample)
+            cropped = prepare_crop(sample, crop_size, mask_depth, mask_rgb_background)
+            inference_mask = cropped.mask if mask_rgb_background else None
+            features = extractor.infer(cropped.rgb, inference_mask)
+            feature_set = FeatureSet(features, extractor.model_name)
+            # 抽出中に承認が取り消された物体を、古い承認のまま出力しない
+            repository.validate_sample(sample)
+            records.append((sample, cropped, feature_set))
+        except Exception as error:
+            # 1物体の失敗で全体を止めないため、種類を問わず理由を記録して続行する
+            LOGGER.exception("sample %sの抽出に失敗した", sample.sample_id)
+            issues.append(f"{sample.session_id}/{sample.image_id}: DINO抽出: {error}")
+            failed.append(sample.sample_id)
 
-        if not records:
-            raise DataContractError("全てのready sampleでDINO抽出に失敗した")
-        output = export_cnn_bundle(
-            delivery_root,
-            crop_size,
-            dataset_version,
-            records,
-            issues,
-            mask_depth,
-            mask_rgb_background,
-        )
+    if not records:
+        raise DataContractError("全てのready sampleでDINO抽出に失敗した")
+    output = export_cnn_bundle(
+        delivery_root,
+        crop_size,
+        dataset_version,
+        records,
+        issues,
+        mask_depth=mask_depth,
+        mask_rgb_background=mask_rgb_background,
+    )
 
     return DeliverySummary(
         output, len(loaded.samples), output.exported_count, tuple(failed)

@@ -16,3 +16,4 @@ data/
 weights/
 runs/
 third_party/
+src/test/output/

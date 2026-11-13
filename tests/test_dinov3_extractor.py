@@ -18,17 +18,16 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
 import torch
-from conftest import RGB_COLOR, SampleFactory
+from conftest import RGB_COLOR
+from PIL import Image
 
 from dinov3_pipeline.common.constants import PRETRAIN_NORMALIZATION
-from dinov3_pipeline.common.models import FeatureArtifact
 from dinov3_pipeline.dinov3.extractor import Dinov3FeatureExtractor
 
 CROP_SIZE = 32
@@ -97,8 +96,6 @@ def _hub(model: torch.nn.Module) -> Iterator[MagicMock]:
 
 def _extractor(
     dataset: str = "lvd1689m",
-    crop_size: int = CROP_SIZE,
-    mask_rgb_background: bool = True,
 ) -> Dinov3FeatureExtractor:
     """ダミーモデルで抽出器を作る。
 
@@ -109,9 +106,7 @@ def _extractor(
     Returns:
         抽出器。
     """
-    return Dinov3FeatureExtractor(
-        MODEL_NAME, dataset, crop_size, "cpu", mask_rgb_background
-    )
+    return Dinov3FeatureExtractor(MODEL_NAME, dataset, "cpu")
 
 
 def test_init_passes_hf_token_to_from_pretrained(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -128,7 +123,7 @@ def test_init_passes_hf_token_to_from_pretrained(monkeypatch: pytest.MonkeyPatch
 
     monkeypatch.setenv("HF_TOKEN", "hf_secret_token")
     with patch("transformers.AutoModel.from_pretrained", return_value=DummyModel()) as mocked:
-        Dinov3FeatureExtractor(MODEL_NAME, "lvd1689m", CROP_SIZE, "cpu")
+        Dinov3FeatureExtractor(MODEL_NAME, "lvd1689m", "cpu")
 
     mocked.assert_called_once_with(MODEL_NAME, token="hf_secret_token")
 
@@ -144,7 +139,7 @@ def test_init_loads_model_from_official_model_id() -> None:
 @pytest.mark.parametrize("model_name", ["dinov3_vitb16", "unknown/model"])
 def test_init_rejects_non_official_model_id(model_name: str) -> None:
     with pytest.raises(ValueError, match="公式Hugging Face ID"):
-        Dinov3FeatureExtractor(model_name, "lvd1689m", CROP_SIZE, "cpu")
+        Dinov3FeatureExtractor(model_name, "lvd1689m", "cpu")
 
 
 def test_init_transformers_failure_raises_runtime_error() -> None:
@@ -159,127 +154,121 @@ def test_init_transformers_failure_raises_runtime_error() -> None:
 def test_init_crop_size_not_multiple_of_patch_raises_value_error() -> None:
     """patch sizeで割り切れないcropサイズを拒否する。"""
     # 準備・実行・検証
-    with _hub(FakeBackbone()), pytest.raises(ValueError, match="割り切れる"):
-        _extractor(crop_size=PATCH_SIZE + 1)
+    with _hub(FakeBackbone()):
+        extractor = _extractor()
+    image = Image.new("RGB", (PATCH_SIZE + 1, PATCH_SIZE), RGB_COLOR)
+    with pytest.raises(ValueError, match="割り切れる"):
+        extractor.infer(image)
 
 
 @pytest.fixture
-def extracted(make_sample: SampleFactory, tmp_path: Path) -> tuple[FeatureArtifact, Path, FakeBackbone]:
-    """物体の周囲に背景があるsampleを抽出し、結果とダミーモデルを返す。
+def extracted() -> tuple[dict[str, np.ndarray], FakeBackbone]:
+    """整形済みRGBとmaskを推論し、特徴量とダミーモデルを返す。
 
     Args:
-        make_sample: 承認済み物体の生成関数。
-        tmp_path: 一時ディレクトリ。
-
     Returns:
-        抽出結果、特徴量ファイル、入力を記録したダミーモデル。
+        特徴量辞書と入力を記録したダミーモデル。
     """
     backbone = FakeBackbone()
-    sample = make_sample(size=64, mask_box=(24, 24, 40, 40))
-    destination = tmp_path / "features" / "sample.npy"
+    image = Image.new("RGB", (CROP_SIZE, CROP_SIZE), RGB_COLOR)
+    mask = Image.new("L", (CROP_SIZE, CROP_SIZE), 0)
+    mask.paste(255, (8, 8, 24, 24))
     with _hub(backbone):
-        artifact = _extractor().extract(sample, destination)
-    return artifact, destination, backbone
+        features = _extractor().infer(image, mask)
+    return features, backbone
 
 
 def test_extract_valid_sample_returns_patch_grid_shape(
-    extracted: tuple[FeatureArtifact, Path, FakeBackbone],
+    extracted: tuple[dict[str, np.ndarray], FakeBackbone],
 ) -> None:
     """crop辺長/patch sizeのgridと、特徴次元のshapeを返す。"""
     # 準備・実行
-    artifact, _, _ = extracted
-
-    # 検証
-    assert artifact.shape == (GRID, GRID, HIDDEN_SIZE)
+    features, _ = extracted
+    assert features["feature"].shape == (GRID, GRID, HIDDEN_SIZE)
 
 
 def test_extract_valid_sample_saves_float32_npy(
-    extracted: tuple[FeatureArtifact, Path, FakeBackbone],
+    extracted: tuple[dict[str, np.ndarray], FakeBackbone],
 ) -> None:
-    """特徴量を、有限値のfloat32 NPYとして保存する。"""
+    """返却された全特徴量が、有限値のfloat32 HWC配列である。"""
     # 準備・実行
-    _, destination, _ = extracted
+    features, _ = extracted
+    assert set(features) == {
+        "feature",
+        "feature_block_1",
+        "feature_block_2",
+        "feature_block_3",
+        "feature_block_4",
+    }
+    assert all(value.dtype == np.float32 for value in features.values())
+    assert all(value.shape == (GRID, GRID, HIDDEN_SIZE) for value in features.values())
+    assert all(np.isfinite(value).all() for value in features.values())
 
-    # 検証
-    features = np.load(destination, allow_pickle=False)
-    assert features.dtype == np.float32 and np.isfinite(features).all()
-    assert len(extracted[0].block_paths) == 4
-    assert all(path.is_file() for path in extracted[0].block_paths)
+
+def test_infer_requires_rgb_mode() -> None:
+    with _hub(FakeBackbone()):
+        extractor = _extractor()
+    with pytest.raises(ValueError, match="RGB mode"):
+        extractor.infer(Image.new("L", (CROP_SIZE, CROP_SIZE)))
 
 
-def test_extract_valid_sample_records_model_name(extracted: tuple[FeatureArtifact, Path, FakeBackbone]) -> None:
-    """生成元として公式モデルIDを返す。"""
-    # 準備・実行
-    artifact, _, _ = extracted
-
-    # 検証
-    assert artifact.model_name == MODEL_NAME
+def test_infer_rejects_mask_with_different_dimensions() -> None:
+    with _hub(FakeBackbone()):
+        extractor = _extractor()
+    image = Image.new("RGB", (CROP_SIZE, CROP_SIZE), RGB_COLOR)
+    mask = Image.new("L", (PATCH_SIZE, PATCH_SIZE), 255)
+    with pytest.raises(ValueError, match="寸法が一致"):
+        extractor.infer(image, mask)
 
 
 def test_extract_valid_sample_inputs_exact_zero_for_background(
-    extracted: tuple[FeatureArtifact, Path, FakeBackbone],
+    extracted: tuple[dict[str, np.ndarray], FakeBackbone],
 ) -> None:
     """正規化後の背景を、厳密に0にしてモデルへ渡す。"""
     # 準備・実行
-    _, _, backbone = extracted
+    _, backbone = extracted
 
     # 検証
     assert backbone.last_input is not None
     assert torch.count_nonzero(backbone.last_input[0, :, 0, 0]) == 0
 
 
-def test_extract_without_rgb_mask_preserves_normalized_background(
-    make_sample: SampleFactory,
-    tmp_path: Path,
-) -> None:
-    """RGB背景除去無効時はDINO入力にmaskを掛けない。"""
+def test_infer_without_mask_preserves_normalized_background() -> None:
+    """mask省略時は入力画素をそのまま正規化する。"""
     backbone = FakeBackbone()
-    sample = make_sample(size=64, mask_box=(24, 24, 40, 40))
-
+    image = Image.new("RGB", (CROP_SIZE, CROP_SIZE), RGB_COLOR)
     with _hub(backbone):
-        _extractor(mask_rgb_background=False).extract(
-            sample, tmp_path / "feature.npy"
-        )
+        _extractor().infer(image)
 
     assert backbone.last_input is not None
     assert torch.count_nonzero(backbone.last_input[0, :, 0, 0]) > 0
 
 
-def test_extract_removes_model_reported_special_tokens_before_saving(
-    make_sample: SampleFactory,
-    tmp_path: Path,
-) -> None:
-    """CLSとregister tokenを除き、patchだけを行優先のHWC gridに保存する。"""
+def test_infer_removes_model_reported_special_tokens() -> None:
+    """CLSとregister tokenを除き、patchだけを行優先のHWC gridにする。"""
     backbone = FakeBackbone()
-    sample = make_sample(size=64, mask_box=(24, 24, 40, 40))
-    destination = tmp_path / "feature.npy"
+    image = Image.new("RGB", (CROP_SIZE, CROP_SIZE), RGB_COLOR)
 
     with _hub(backbone):
-        _extractor().extract(sample, destination)
+        features = _extractor().infer(image)
 
-    features = np.load(destination, allow_pickle=False)
-    assert features.shape == (GRID, GRID, HIDDEN_SIZE)
+    final_feature = features["feature"]
+    assert final_feature.shape == (GRID, GRID, HIDDEN_SIZE)
     with torch.inference_mode():
         expected = backbone.norm(backbone.layer_outputs[-1])[:, 5:, :].reshape(
             GRID, GRID, HIDDEN_SIZE
         ).numpy()
-    np.testing.assert_allclose(features, expected)
+    np.testing.assert_allclose(final_feature, expected)
 
 
 def test_extract_saves_quartile_block_outputs_in_order_before_final_layer_norm(
-    extracted: tuple[FeatureArtifact, Path, FakeBackbone],
+    extracted: tuple[dict[str, np.ndarray], FakeBackbone],
 ) -> None:
-    artifact, _, backbone = extracted
+    features, backbone = extracted
     layers = (3, 6, 9, 12)
 
-    assert [path.parent.name for path in artifact.block_paths] == [
-        "feature_block_1",
-        "feature_block_2",
-        "feature_block_3",
-        "feature_block_4",
-    ]
-    for path, layer in zip(artifact.block_paths, layers):
-        actual = np.load(path, allow_pickle=False)
+    for index, layer in enumerate(layers, start=1):
+        actual = features[f"feature_block_{index}"]
         expected = backbone.layer_outputs[layer][:, 5:, :].reshape(
             GRID, GRID, HIDDEN_SIZE
         ).numpy()
@@ -287,11 +276,11 @@ def test_extract_saves_quartile_block_outputs_in_order_before_final_layer_norm(
 
 
 def test_extract_final_feature_is_final_block_output_after_final_layer_norm(
-    extracted: tuple[FeatureArtifact, Path, FakeBackbone],
+    extracted: tuple[dict[str, np.ndarray], FakeBackbone],
 ) -> None:
-    artifact, destination, backbone = extracted
-    final_feature = np.load(destination, allow_pickle=False)
-    final_block = np.load(artifact.block_paths[-1], allow_pickle=False)
+    features, backbone = extracted
+    final_feature = features["feature"]
+    final_block = features["feature_block_4"]
 
     assert not np.array_equal(final_feature, final_block)
     with torch.inference_mode():
@@ -302,45 +291,40 @@ def test_extract_final_feature_is_final_block_output_after_final_layer_norm(
 
 
 def test_extract_rejects_output_when_special_token_boundary_is_unknown(
-    make_sample: SampleFactory,
-    tmp_path: Path,
 ) -> None:
     """モデル情報からspecial tokenの境界を得られない出力を拒否する。"""
     backbone = FakeBackbone()
     del backbone.embeddings
-    sample = make_sample(size=64, mask_box=(24, 24, 40, 40))
+    image = Image.new("RGB", (CROP_SIZE, CROP_SIZE), RGB_COLOR)
 
     with _hub(backbone), pytest.raises(ValueError, match="境界をモデル情報から識別できない"):
-        _extractor().extract(sample, tmp_path / "feature.npy")
+        _extractor().infer(image)
 
 
 def test_extract_rejects_invalid_special_and_patch_token_count(
-    make_sample: SampleFactory,
-    tmp_path: Path,
 ) -> None:
     """special token数を除いてもgrid数に一致しない出力を拒否する。"""
     backbone = FakeBackbone(token_count=10)
-    sample = make_sample(size=64, mask_box=(24, 24, 40, 40))
+    image = Image.new("RGB", (CROP_SIZE, CROP_SIZE), RGB_COLOR)
 
     with _hub(backbone), pytest.raises(ValueError, match="patch tokenは4個必要"):
-        _extractor().extract(sample, tmp_path / "feature.npy")
+        _extractor().infer(image)
 
 
 @pytest.mark.parametrize("dataset", sorted(PRETRAIN_NORMALIZATION))
 def test_extract_pretrain_dataset_normalizes_with_matching_statistics(
-    make_sample: SampleFactory,
-    tmp_path: Path,
     dataset: str,
 ) -> None:
     """事前学習データに対応する平均・標準偏差で正規化する。"""
     # 準備
     backbone = FakeBackbone()
-    sample = make_sample(size=64, mask_box=(24, 24, 40, 40))
+    image = Image.new("RGB", (CROP_SIZE, CROP_SIZE), RGB_COLOR)
+    mask = Image.new("L", (CROP_SIZE, CROP_SIZE), 255)
     mean, std = PRETRAIN_NORMALIZATION[dataset]
 
     # 実行
     with _hub(backbone):
-        _extractor(dataset).extract(sample, tmp_path / "feature.npy")
+        _extractor(dataset).infer(image, mask)
 
     # 検証
     assert backbone.last_input is not None

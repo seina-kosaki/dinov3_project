@@ -33,8 +33,8 @@ from dinov3_pipeline.common.constants import (
     RGB_DIR,
     SAFE_NAME_PATTERN,
 )
-from dinov3_pipeline.common.models import DataContractError, DeliveryOutput, FeatureArtifact, ReadySample
-from dinov3_pipeline.data_loading.preprocessing import prepare_crop
+from dinov3_pipeline.common.models import DataContractError, DeliveryOutput, FeatureSet, ReadySample
+from dinov3_pipeline.data_loading.preprocessing import CroppedInputs
 from dinov3_pipeline.saving.pca_visualizer import save_pca_visualization
 
 SCHEMA = """
@@ -55,8 +55,17 @@ CREATE TABLE samples(
     feature_block_4_path TEXT NOT NULL
 );
 """
-SAMPLE_COLUMNS = 13
 FEATURE_BLOCK_DIRS = tuple(f"feature_block_{index}" for index in range(1, 5))
+FEATURE_KEYS = (
+    "feature",
+    "feature_block_1",
+    "feature_block_2",
+    "feature_block_3",
+    "feature_block_4",
+)
+SAMPLE_INSERT_QUERY = (
+    "INSERT INTO samples VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+)
 
 
 @dataclass
@@ -73,17 +82,36 @@ def export_cnn_bundle(
     delivery_root: Path,
     crop_size: int,
     dataset_version: str,
-    records: list[tuple[ReadySample, FeatureArtifact]],
+    records: list[tuple[ReadySample, CroppedInputs, FeatureSet]],
     issues: list[str],
+    # 学習メモ: `*`より後ろは名前付きで渡し、位置引数の取り違えを防ぐ。
+    *,
     mask_depth: bool = True,
     mask_rgb_background: bool = True,
 ) -> DeliveryOutput:
-    """承認済み sample を CNN bundle と debug 出力へ一括で書き出す。"""
+    """承認済みsampleをCNN bundleとdebug出力へ書き出す。
+
+    Args:
+        delivery_root: 成果物を公開するroot directory。
+        crop_size: 保存するcropの1辺の長さ。
+        dataset_version: bundleのversion名。
+        records: sample、整形済みmodalities、特徴量の組。
+        issues: 入力処理中に記録されたissue一覧。
+        mask_depth: Trueなら保存depthのmask外を0にした設定値。
+        mask_rgb_background: PCA可視化で前景だけを使う設定値。
+
+    Returns:
+        CNN bundleとdebug出力の生成結果。
+
+    Raises:
+        DataContractError: version、record、モデル構成が契約に合わない場合。
+        FileExistsError: 同じversionの出力が既に存在する場合。
+    """
     if re.fullmatch(SAFE_NAME_PATTERN, dataset_version) is None:
         raise DataContractError(f"dataset versionが不正である: {dataset_version}")
     if not records:
         raise DataContractError("CNN bundleへ出力できる承認済みsampleがない")
-    model_names = {artifact.model_name for _, artifact in records}
+    model_names = {feature_set.model_name for _, _, feature_set in records}
     if len(model_names) != 1:
         raise DataContractError("同一bundle内でDINOv3モデルを混在できない")
 
@@ -107,8 +135,7 @@ def export_cnn_bundle(
             dataset_version,
             bundle,
             debug,
-            mask_depth,
-            mask_rgb_background,
+            mask_rgb_background=mask_rgb_background,
         )
         if not result.rows:
             raise DataContractError("CNN bundleへ出力できるcropがない")
@@ -119,7 +146,7 @@ def export_cnn_bundle(
             crop_size,
             model_name,
             result.rows,
-            mask_depth,
+            mask_depth=mask_depth,
         )
         all_issues = [*issues, *result.issues]
         _write_issues(debug / dataset_version / ISSUES_FILE, all_issues)
@@ -130,17 +157,29 @@ def export_cnn_bundle(
 
 
 def _write_samples(
-    records: list[tuple[ReadySample, FeatureArtifact]],
+    records: list[tuple[ReadySample, CroppedInputs, FeatureSet]],
     crop_size: int,
     dataset_version: str,
     bundle: Path,
     debug: Path,
-    mask_depth: bool,
+    *,
     mask_rgb_background: bool,
 ) -> _WriteResult:
-    """各 sample を crop・特徴量・debug 画像へ書き出し、SQLite 行も準備する。"""
+    """整形済みsampleと特徴量を保存し、SQLite行とdebug出力を準備する。
+
+    Args:
+        records: sample、整形済みmodalities、特徴量の組。
+        crop_size: 整形済み画像の期待辺長。
+        dataset_version: debug出力のdirectory名。
+        bundle: 一時bundle directory。
+        debug: 一時debug directory。
+        mask_rgb_background: PCA可視化で前景だけを使う設定値。
+
+    Returns:
+        保存成功行、debug directory、issueをまとめた結果。
+    """
     result = _WriteResult()
-    for sample, artifact in records:
+    for sample, cropped, feature_set in records:
         key = hashlib.sha256(sample.sample_id.encode("utf-8")).hexdigest()
         rgb = PurePosixPath(RGB_DIR) / f"{key}{IMAGE_SUFFIX}"
         depth = PurePosixPath(DEPTH_DIR) / f"{key}{DEPTH_SUFFIX}"
@@ -153,29 +192,25 @@ def _write_samples(
         try:
             _validate_segment(sample.capture_date, "capture date")
             _validate_segment(sample.session_id, "session ID")
-            cropped = prepare_crop(
-                sample, crop_size, mask_depth, mask_rgb_background
-            )
-            if len(artifact.block_paths) != len(FEATURE_BLOCK_DIRS):
-                raise DataContractError("DINO特徴量には4つのblock出力が必要である")
-            feature_sources = (artifact.path, *artifact.block_paths)
-            feature_destinations = (feature, *feature_blocks)
-            for source in feature_sources:
-                data = np.load(source, allow_pickle=False)
-                if (
-                    data.dtype != np.dtype(FEATURE_DTYPE)
-                    or data.ndim != FEATURE_NDIM
-                    or data.shape != artifact.shape
-                ):
-                    raise DataContractError(
-                        f"DINO特徴量は{artifact.shape}の{FEATURE_DTYPE} {FEATURE_LAYOUT} NPYでなければならない"
-                    )
+            _validate_cropped_inputs(cropped, crop_size)
+            _validate_feature_set(feature_set.features)
+            feature_paths = {
+                "feature": feature,
+                "feature_block_1": feature_blocks[0],
+                "feature_block_2": feature_blocks[1],
+                "feature_block_3": feature_blocks[2],
+                "feature_block_4": feature_blocks[3],
+            }
+            for key_name, relative_path in feature_paths.items():
+                np.save(
+                    bundle / relative_path,
+                    feature_set.features[key_name],
+                    allow_pickle=False,
+                )
 
             cropped.rgb.save(bundle / rgb, format=IMAGE_FORMAT)
             cropped.mask.save(bundle / mask, format=IMAGE_FORMAT)
             cropped.depth.save(bundle / depth, format=DEPTH_FORMAT)
-            for source, destination in zip(feature_sources, feature_destinations):
-                shutil.copy2(source, bundle / destination)
 
             debug_dir = PurePosixPath(dataset_version) / sample.capture_date / sample.session_id
             try:
@@ -210,15 +245,57 @@ def _write_samples(
     return result
 
 
+def _validate_cropped_inputs(cropped: CroppedInputs, crop_size: int) -> None:
+    """RGB・mask・depthが設定crop_sizeの同じ寸法であることを確認する。"""
+    expected_size = (crop_size, crop_size)
+    if cropped.rgb.size != expected_size:
+        raise DataContractError("整形済みRGB・mask・depthは設定crop_sizeの同じ寸法である必要がある")
+    if cropped.mask.size != expected_size or cropped.depth.size != expected_size:
+        raise DataContractError("整形済みRGB・mask・depthは設定crop_sizeの同じ寸法である必要がある")
+
+
+def _validate_feature_set(features: dict[str, np.ndarray]) -> None:
+    """5種類の特徴量key、dtype、shapeがbundle契約を満たすことを確認する。"""
+    if set(features) != set(FEATURE_KEYS):
+        raise DataContractError("DINO特徴量にはfeatureと4つのblock出力が必要である")
+
+    expected_shape: tuple[int, ...] | None = None
+    for key_name in FEATURE_KEYS:
+        feature = features[key_name]
+        if (
+            feature.dtype != np.dtype(FEATURE_DTYPE)
+            or feature.ndim != FEATURE_NDIM
+            or feature.shape[0] <= 0
+            or feature.shape[1] <= 0
+            or feature.shape[2] <= 0
+        ):
+            raise DataContractError(
+                f"DINO特徴量は{FEATURE_DTYPE} {FEATURE_LAYOUT} NPYでなければならない"
+            )
+        if expected_shape is not None and feature.shape != expected_shape:
+            raise DataContractError("5種類のDINO特徴量のshapeが一致しない")
+        expected_shape = feature.shape
+
+
 def _write_database(
     path: Path,
     dataset_version: str,
     crop_size: int,
     model_name: str,
     rows: list[tuple[str, ...]],
+    *,
     mask_depth: bool,
 ) -> None:
-    """dataset_metadata と samples を SQLite に書き出す。"""
+    """dataset_metadataとsamplesをSQLiteへ書き出す。
+
+    Args:
+        path: 作成するSQLite database path。
+        dataset_version: 出力bundleのversion。
+        crop_size: RGB・depth・maskのcrop辺長。
+        model_name: 特徴量生成に使用したモデルID。
+        rows: samples tableへ挿入する行。
+        mask_depth: 保存時のdepth背景mask設定。
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(path)
     try:
@@ -234,8 +311,7 @@ def _write_database(
                 ("model_name", model_name),
             ),
         )
-        placeholders = ", ".join("?" * SAMPLE_COLUMNS)
-        connection.executemany(f"INSERT INTO samples VALUES ({placeholders})", rows)
+        connection.executemany(SAMPLE_INSERT_QUERY, rows)
         connection.commit()
     finally:
         connection.close()

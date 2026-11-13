@@ -2,6 +2,8 @@
 
 ## 目的
 
+推論APIの後続仕様は[DINOv3推論API仕様](dinov3_inference_api.md)を参照する。本書の構成・特徴量条件のうち、推論部と画像整形部の責務に関する説明は同仕様に従う。
+
 既存の承認済みデータからCNN bundleとdebug成果物を作る実行経路を読みやすく整理し、DINOv3の取得・ロードをローカルcloneと`torch.hub`からHugging Face Transformersへ移す。特徴量の保存先とSQLite参照列は本仕様で明記する合意済み変更を除き維持する。今回の対象はpatch特徴量を持つ6つのViTモデルであり、ConvNeXtは含めない。RGB背景除去の有効・無効は`mask_rgb_background`で選択し、詳細は[RGB mask処理とエントリーポイント仕様](mask_processing_and_entrypoint.md)を参照する。
 
 入力選択・承認検証・採番・一時出力と公開の順序、および画像・depth・mask・debugの出力契約は維持する。合意済みの特徴量出力変更は、最終層特徴量の意味の明確化、4つのblock特徴量ファイルの追加、`samples`への対応path列追加である。`dataset_metadata`からの`weights_sha256` key/value行削除も許可済み差分とし、[出力契約正本](contracts/cnn_delivery.md)に記載する。モデル実装の変更による特徴量の実数値の完全一致は要求しない。数値差が生じ得る。
@@ -96,8 +98,8 @@ importの向きは、`main.py → settings/common/usecase`、`usecase → data_l
 
 | 責務 | 移行後の主要モジュール | 維持・整理する内容 |
 |---|---|---|
-| データ読み込み | `data_loading/session_repository.py`、`data_loading/preprocessing.py` | session DB探索・read-only読込、ready sample化、再検証、画像読込と共通cropを担う。DB・画像の読込条件とcrop契約を変えない。 |
-| DINOv3推論 | `dinov3/extractor.py`、`common/ports.py` | Transformersモデルのロード、評価／推論モード、現行の入力正規化・mask処理、最終層および指定中間層のpatch特徴量抽出を担う。`torch.hub`由来のrepo・重み引数を除く。 |
+| データ読み込み・整形 | `data_loading/session_repository.py`、`data_loading/preprocessing.py` | session DB探索・read-only読込、ready sample化、再検証、RGB/depth/maskの読込・共通crop・入力整形を担う。DB・画像の読込条件とcrop契約を変えない。 |
+| DINOv3推論 | `dinov3/extractor.py`、`common/ports.py` | Transformersモデルのロード、評価／推論モード、DINO固有の正規化・Tensor変換、最終層および指定中間層のpatch特徴量抽出を担う。物体crop・SQL・ファイル保存は行わない。`torch.hub`由来のrepo・重み引数を除く。詳細な呼出APIは[DINOv3推論API仕様](dinov3_inference_api.md)を参照する。 |
 | 保存・公開 | `saving/cnn_bundle_exporter.py`、`saving/dataset_version.py`、`saving/pca_visualizer.py` | 一時出力、5種類の特徴量NPY・画像・SQLite・debug保存、予約済みversionの公開順序と失敗時動作を担う。 |
 | 共通utility・データ契約 | `common/` | 共有定数、hash処理、データ契約、抽出器境界を置く。特定のI/O責務やorchestrationは持たせない。 |
 | 起点・設定・orchestration | `src/main.py`、`settings.py`、`usecase/sample_processing.py` | 起点は組立て、設定は設定読込、usecaseは処理順序の制御を担う。 |

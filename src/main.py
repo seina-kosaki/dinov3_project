@@ -56,9 +56,7 @@ def main() -> int:
         extractor = Dinov3FeatureExtractor(
             settings.model_name,
             settings.pretrain_dataset,
-            settings.crop_size,
             settings.device,
-            settings.mask_rgb_background,
         )
         # 承認sampleごとに特徴量を推論・抽出し、CNN bundleとdebug可視化を出力する
         summary = process_approved_samples(
@@ -67,9 +65,9 @@ def main() -> int:
             extractor,
             settings.delivery_root,
             settings.crop_size,
-            dataset_version,
-            settings.mask_depth,
-            settings.mask_rgb_background,
+            dataset_version=dataset_version,
+            mask_depth=settings.mask_depth,
+            mask_rgb_background=settings.mask_rgb_background,
         )
     except (DataContractError, OSError, ValueError, RuntimeError):
         LOGGER.exception("DINOv3のdeliveryが失敗した")

@@ -30,11 +30,12 @@ from PIL import Image
 from dinov3_pipeline.common.models import (
     DataContractError,
     DeliveryOutput,
-    FeatureArtifact,
+    FeatureSet,
     ReadySample,
 )
 from dinov3_pipeline.saving import cnn_bundle_exporter
 from dinov3_pipeline.saving.cnn_bundle_exporter import export_cnn_bundle
+from dinov3_pipeline.data_loading.preprocessing import CroppedInputs, prepare_crop
 
 CROP_SIZE = 32
 VERSION = "capture_v001"
@@ -61,7 +62,7 @@ class Delivered:
 
     output: DeliveryOutput
     sample: ReadySample
-    artifact: FeatureArtifact
+    artifact: FeatureSet
     root: Path
 
 
@@ -69,8 +70,8 @@ def _artifact(
     tmp_path: Path,
     file_suffix: str = "feature",
     model_name: str = "facebook/dinov3-vits16-pretrain-lvd1689m",
-) -> FeatureArtifact:
-    """小さなHWC特徴量を保存し、artifactを返す。
+) -> FeatureSet:
+    """小さなHWC特徴量配列をまとめて返す。
 
     Args:
         tmp_path: 保存先。
@@ -78,26 +79,22 @@ def _artifact(
         model_name: 特徴量を生成したモデルID。
 
     Returns:
-        保存済みの特徴量 artifact。
+        特徴量セット。
     """
-    path = tmp_path / f"{file_suffix}.npy"
-    np.save(path, np.arange(16, dtype=np.float32).reshape(2, 2, 4), allow_pickle=False)
-    block_paths = []
+    features = {"feature": np.arange(16, dtype=np.float32).reshape(2, 2, 4)}
     for index in range(1, 5):
-        block_path = tmp_path / f"feature_block_{index}-{file_suffix}.npy"
-        np.save(
-            block_path,
-            np.full((2, 2, 4), index, dtype=np.float32),
-            allow_pickle=False,
-        )
-        block_paths.append(block_path)
-    return FeatureArtifact(
-        path,
-        (2, 2, 4),
-        "float32",
-        model_name,
-        tuple(block_paths),
-    )
+        features[f"feature_block_{index}"] = np.full((2, 2, 4), index, dtype=np.float32)
+    return FeatureSet(features, model_name)
+
+
+def _record(
+    sample: ReadySample,
+    features: FeatureSet,
+    mask_depth: bool = True,
+    mask_rgb_background: bool = True,
+) -> tuple[ReadySample, CroppedInputs, FeatureSet]:
+    cropped = prepare_crop(sample, CROP_SIZE, mask_depth, mask_rgb_background)
+    return sample, cropped, features
 
 
 @pytest.fixture
@@ -114,7 +111,7 @@ def delivered(make_sample: SampleFactory, tmp_path: Path) -> Delivered:
     sample = make_sample(size=64, mask_box=(16, 16, 48, 48))
     artifact = _artifact(tmp_path)
     root = tmp_path / "delivery"
-    output = export_cnn_bundle(root, CROP_SIZE, VERSION, [(sample, artifact)], [])
+    output = export_cnn_bundle(root, CROP_SIZE, VERSION, [_record(sample, artifact)], [])
     return Delivered(output, sample, artifact, root)
 
 
@@ -260,7 +257,7 @@ def test_export_cnn_bundle_depth_background_matches_selected_mask_setting(make_s
         tmp_path / "delivery",
         CROP_SIZE,
         VERSION,
-        [(sample, artifact)],
+        [_record(sample, artifact, mask_depth=mask_depth)],
         [],
         mask_depth=mask_depth,
     )
@@ -291,7 +288,7 @@ def test_export_cnn_bundle_without_rgb_mask_preserves_rgb_and_mask_output(
         tmp_path / "delivery",
         CROP_SIZE,
         VERSION,
-        [(sample, artifact)],
+        [_record(sample, artifact, mask_depth=False, mask_rgb_background=False)],
         [],
         mask_depth=False,
         mask_rgb_background=False,
@@ -324,16 +321,22 @@ def test_export_cnn_bundle_valid_sample_copies_feature_npy_unchanged(
 ) -> None:
     """最終特徴量と4つのblock NPYを内容を変えずにbundleへコピーする。"""
     row = _row(delivered)
-    sources = (delivered.artifact.path, *delivered.artifact.block_paths)
+    feature_keys = (
+        "feature",
+        "feature_block_1",
+        "feature_block_2",
+        "feature_block_3",
+        "feature_block_4",
+    )
     key = hashlib.sha256(delivered.sample.sample_id.encode("utf-8")).hexdigest()
     expected_paths = [
         f"features/{key}.npy",
         *(f"feature_block_{index}/{key}.npy" for index in range(1, 5)),
     ]
     assert list(row[8:]) == expected_paths
-    for source, relative in zip(sources, row[8:]):
+    for key_name, relative in zip(feature_keys, row[8:]):
         copied = np.load(delivered.output.cnn_path / relative, allow_pickle=False)
-        np.testing.assert_array_equal(copied, np.load(source, allow_pickle=False))
+        np.testing.assert_array_equal(copied, delivered.artifact.features[key_name])
         assert copied.dtype == np.float32
         assert copied.shape == (2, 2, 4)
 
@@ -372,7 +375,7 @@ def test_export_cnn_bundle_existing_version_raises_file_exists_error(
             delivered.root,
             CROP_SIZE,
             VERSION,
-            [(delivered.sample, delivered.artifact)],
+            [_record(delivered.sample, delivered.artifact)],
             [],
         )
 
@@ -382,7 +385,7 @@ def test_export_cnn_bundle_mixed_models_raises_contract_error(make_sample: Sampl
     # 準備
     sample = make_sample(size=64, mask_box=(16, 16, 48, 48))
     records = [
-        (
+        _record(
             sample,
             _artifact(
                 tmp_path,
@@ -390,7 +393,7 @@ def test_export_cnn_bundle_mixed_models_raises_contract_error(make_sample: Sampl
                 "facebook/dinov3-vits16-pretrain-lvd1689m",
             ),
         ),
-        (
+        _record(
             sample,
             _artifact(
                 tmp_path,
@@ -417,39 +420,33 @@ def test_export_cnn_bundle_unsafe_version_raises_contract_error(make_sample: Sam
             tmp_path / "delivery",
             CROP_SIZE,
             version,
-            [(sample, _artifact(tmp_path))],
+            [_record(sample, _artifact(tmp_path))],
             [],
         )
 
 
-def test_export_cnn_bundle_oversized_sample_is_excluded_with_diagnostics(
+def test_export_cnn_bundle_saves_prepared_images_without_reading_sources(
     make_sample: SampleFactory,
     tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """exportでのcrop超過はissueに一度記録し、他のsampleを公開する。"""
-    valid = make_sample(mask_box=(16, 16, 48, 48))
-    oversized_mask = valid.mask_path.with_name("oversized-mask.png")
-    image = Image.new("L", (64, 64), 0)
-    image.paste(255, (0, 0, 64, 16))
-    image.save(oversized_mask)
-    oversized = replace(valid, sample_id="oversized", mask_path=oversized_mask)
+    """保存部は受け取った整形済みデータを使い、原画像を再読込しない。"""
+    sample = make_sample(mask_box=(16, 16, 48, 48))
     artifact = _artifact(tmp_path)
+    cropped = prepare_crop(sample, CROP_SIZE)
+    sample.rgb_path.unlink()
+    sample.mask_path.unlink()
+    sample.depth_path.unlink()
     output = export_cnn_bundle(
         tmp_path / "delivery",
         CROP_SIZE,
         VERSION,
-        [(oversized, artifact), (valid, artifact)],
+        [(sample, cropped, artifact)],
         [],
     )
     assert output.exported_count == 1
-    assert output.issue_count == 1
-    issues = (output.debug_path / VERSION / "issues.csv").read_text(encoding="utf-8-sig")
-    assert issues.count("対象maskが設定crop_sizeに収まらない") == 1
-    assert "oversized, crop_size=32, foreground_width=64, foreground_height=16" in issues
-    assert capsys.readouterr() == ("", "")
-    assert not caplog.records
+    row = _row(Delivered(output, sample, artifact, tmp_path / "delivery"))
+    with Image.open(output.cnn_path / row[5]) as saved_rgb:
+        assert np.array_equal(np.asarray(saved_rgb), np.asarray(cropped.rgb))
 
 
 @pytest.mark.parametrize("failure_at", ["none", "cnn", "debug", "issues"])
@@ -487,10 +484,10 @@ def test_export_cnn_bundle_publication_order_and_failure_state(
 
     monkeypatch.setattr(Path, "replace", observe_replace)
     if failure_at == "none":
-        export_cnn_bundle(root, CROP_SIZE, VERSION, [(sample, artifact)], [])
+        export_cnn_bundle(root, CROP_SIZE, VERSION, [_record(sample, artifact)], [])
     else:
         with pytest.raises(OSError, match="publish failed"):
-            export_cnn_bundle(root, CROP_SIZE, VERSION, [(sample, artifact)], [])
+            export_cnn_bundle(root, CROP_SIZE, VERSION, [_record(sample, artifact)], [])
     expected_order = ["cnn", "debug", "issues"]
     assert observed == (expected_order if failure_at == "none" else expected_order[: expected_order.index(failure_at) + 1])
     assert cnn.exists() == (failure_at != "cnn")
@@ -508,7 +505,7 @@ def test_export_cnn_bundle_existing_debug_prevents_cnn_publication(make_sample: 
     issues.parent.mkdir(parents=True)
     issues.write_text("existing", encoding="utf-8")
     with pytest.raises(FileExistsError, match="debug出力"):
-        export_cnn_bundle(root, CROP_SIZE, VERSION, [(sample, _artifact(tmp_path))], [])
+        export_cnn_bundle(root, CROP_SIZE, VERSION, [_record(sample, _artifact(tmp_path))], [])
     assert not (root / "cnn" / VERSION).exists()
     assert issues.read_text(encoding="utf-8") == "existing"
     assert not list(root.glob(f".{VERSION}-*"))
@@ -522,7 +519,7 @@ def test_export_cnn_bundle_pca_failure_keeps_cnn_and_records_issues(make_sample:
         raise DataContractError("PCA failed")
 
     monkeypatch.setattr(cnn_bundle_exporter, "save_pca_visualization", fail)
-    output = export_cnn_bundle(tmp_path / "delivery", CROP_SIZE, VERSION, [(sample, artifact)], ["input issue"])
+    output = export_cnn_bundle(tmp_path / "delivery", CROP_SIZE, VERSION, [_record(sample, artifact)], ["input issue"])
     assert output.exported_count == 1
     assert output.visualization_count == 0
     assert output.issue_count == 2
@@ -530,7 +527,7 @@ def test_export_cnn_bundle_pca_failure_keeps_cnn_and_records_issues(make_sample:
         assert list(csv.reader(stream)) == [["reason"], ["input issue"], ["session-001/image-001: PCA可視化: PCA failed"]]
     assert not list(output.debug_path.rglob("*.png"))
     copied = next((output.cnn_path / "features").glob("*.npy"))
-    assert copied.read_bytes() == artifact.path.read_bytes()
+    np.testing.assert_array_equal(np.load(copied, allow_pickle=False), artifact.features["feature"])
 
 
 def test_export_cnn_bundle_multiple_dates_and_sessions_publish_in_sorted_order(make_sample: SampleFactory, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -553,7 +550,7 @@ def test_export_cnn_bundle_multiple_dates_and_sessions_publish_in_sorted_order(m
         return original_replace(source, target)
 
     monkeypatch.setattr(Path, "replace", observe_replace)
-    output = export_cnn_bundle(root, CROP_SIZE, VERSION, [(item, artifact) for item in samples], [])
+    output = export_cnn_bundle(root, CROP_SIZE, VERSION, [_record(item, artifact) for item in samples], [])
     debug_dirs = sorted({root / "debug" / VERSION / item.capture_date / item.session_id for item in samples})
     assert observed == [output.cnn_path, *debug_dirs, root / "debug" / VERSION / "issues.csv"]
     assert output.exported_count == output.visualization_count == 3

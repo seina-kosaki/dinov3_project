@@ -32,7 +32,14 @@ class SessionSam3Repository:
         self.timeout_seconds = timeout_seconds
 
     def load_ready_samples(self) -> SampleLoadResult:
-        """承認済み sample を全 session DB から集めて、読み取り契約を検証する。"""
+        """全session DBから承認済みsampleを集め、読み取り契約を検証する。
+
+        Returns:
+            検証済みsampleと処理対象外のissue一覧。
+
+        Raises:
+            DataContractError: 対象rootにsession metadata.sqlite3がない場合。
+        """
         database_paths = sorted(self.data_root.glob(SESSION_DB_GLOB))
         if not database_paths:
             raise DataContractError(f"session metadata.sqlite3が見つからない: {self.data_root}")
@@ -46,7 +53,15 @@ class SessionSam3Repository:
         return SampleLoadResult(tuple(samples), tuple(issues))
 
     def validate_sample(self, sample: ReadySample) -> None:
-        """読み込んだ sample が最初の承認時点と同じ状態を保っているか確認する。"""
+        """sampleが最初の承認時点と同じ状態を保っているか確認する。
+
+        Args:
+            sample: 読込時点の承認情報とfile hashを保持するsample。
+
+        Raises:
+            DataContractError: DB上の承認状態または元ファイルが変化した場合。
+            OSError: 入力fileを読み取れない場合。
+        """
         with self._connection(sample.database_path) as connection:
             row = connection.execute(REVALIDATE_QUERY, sample.row_key).fetchone()
         if row is None or _fingerprint(dict(row)) != sample.fingerprint:
@@ -59,7 +74,14 @@ class SessionSam3Repository:
             raise DataContractError(f"CNN受け渡し用depthが存在しない: {sample.sample_id}")
 
     def _load_database(self, database_path: Path) -> tuple[list[ReadySample], list[str]]:
-        """1つの session DB を走査し、sample 生成か不正行の回収を行う。"""
+        """1つのsession DBを走査し、sample生成または不正行の回収を行う。
+
+        Args:
+            database_path: 読み込むsession SQLiteのpath。
+
+        Returns:
+            検証済みsampleと、そのDBから収集したissue一覧。
+        """
         capture_date = database_path.parents[1].name
         samples: list[ReadySample] = []
         issues: list[str] = []
@@ -80,7 +102,20 @@ class SessionSam3Repository:
         return samples, issues
 
     def _to_sample(self, row: dict[str, Any], capture_date: str, database_path: Path) -> ReadySample:
-        """DB row を検証し、共有ルートから安全なファイル参照へ変換する。"""
+        """DB rowを検証し、共有root内の安全なfile参照へ変換する。
+
+        Args:
+            row: `sam3_dino_results`の1行。
+            capture_date: rowが所属するcapture date。
+            database_path: rowを取得したsession SQLiteのpath。
+
+        Returns:
+            DB状態と元ファイルを識別する情報を持つsample。
+
+        Raises:
+            DataContractError: 必須情報やasset pathが不正な場合。
+            KeyError: 必須列がrowにない場合。
+        """
         if not row["source_path"] or not row["mask_path"] or not row["depth_path"]:
             raise DataContractError("RGB・depth・maskのpathが揃っていない")
         if not row["approval_id"] or not row["review_event_id"]:
@@ -110,7 +145,17 @@ class SessionSam3Repository:
         )
 
     def _resolve_asset(self, value: str) -> Path:
-        """共有データの root から見える相対pathだけを安全に解決する。"""
+        """共有root内にある相対asset pathを安全に解決する。
+
+        Args:
+            value: DBに保存されたPOSIX形式の相対path。
+
+        Returns:
+            存在が確認されたassetの絶対path。
+
+        Raises:
+            DataContractError: pathがroot外を指す、またはfileが存在しない場合。
+        """
         relative = PurePosixPath(value)
         if not value or relative.is_absolute() or ".." in relative.parts or "\\" in value:
             raise DataContractError(f"asset pathが安全なroot相対pathではない: {value}")
@@ -121,7 +166,14 @@ class SessionSam3Repository:
 
     @contextmanager
     def _connection(self, database_path: Path) -> Iterator[sqlite3.Connection]:
-        """読み取り専用で SQLite に接続し、処理終了後に確実に閉じる。"""
+        """SQLiteへ読み取り専用で接続し、処理終了後に接続を閉じる。
+
+        Args:
+            database_path: 接続するSQLite file。
+
+        Yields:
+            row factoryを設定したSQLite connection。
+        """
         connection = sqlite3.connect(f"{database_path.as_uri()}?mode=ro", timeout=self.timeout_seconds, uri=True)
         connection.row_factory = sqlite3.Row
         try:

@@ -25,7 +25,6 @@ import pytest
 
 from dinov3_pipeline.common.models import (
     DataContractError,
-    FeatureArtifact,
     ReadySample,
     SampleLoadResult,
 )
@@ -46,43 +45,22 @@ class ArrayExtractor:
     """
 
     def __init__(self, after_write: Callable[[], None] | None = None) -> None:
+        """特徴量生成後に実行する任意の処理を保持する。"""
         self.after_write = after_write
+        self.model_name = "dinov3_test"
+        self.last_rgb = None
+        self.last_mask = None
 
-    def extract(self, sample: ReadySample, destination: Path) -> FeatureArtifact:
-        """固定のHWC特徴量を保存し、artifactを返す。
-
-        Args:
-            sample: 承認済み物体（使用しない）。
-            destination: 保存先。
-
-        Returns:
-            保存した特徴量のartifact。
-        """
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        np.save(
-            destination,
-            np.arange(16, dtype=np.float32).reshape(2, 2, 4),
-            allow_pickle=False,
-        )
-        block_paths = []
+    def infer(self, rgb_image: object, mask_image: object = None) -> dict[str, np.ndarray]:
+        """固定のHWC特徴量を返す。"""
+        self.last_rgb = rgb_image
+        self.last_mask = mask_image
+        features = {"feature": np.arange(16, dtype=np.float32).reshape(2, 2, 4)}
         for index in range(1, 5):
-            block_path = destination.parent / f"feature_block_{index}" / destination.name
-            block_path.parent.mkdir(parents=True, exist_ok=True)
-            np.save(
-                block_path,
-                np.full((2, 2, 4), index, dtype=np.float32),
-                allow_pickle=False,
-            )
-            block_paths.append(block_path)
+            features[f"feature_block_{index}"] = np.full((2, 2, 4), index, dtype=np.float32)
         if self.after_write is not None:
             self.after_write()
-        return FeatureArtifact(
-            destination,
-            (2, 2, 4),
-            "float32",
-            "dinov3_test",
-            tuple(block_paths),
-        )
+        return features
 
 
 def _revoke(database_path: Path) -> Callable[[], None]:
@@ -118,7 +96,7 @@ def test_process_approved_samples_ready_sample_completes_all_samples(
         ArrayExtractor(),
         tmp_path / "delivery",
         CROP_SIZE,
-        VERSION,
+        dataset_version=VERSION,
     )
 
     # 検証
@@ -144,11 +122,38 @@ def test_process_approved_samples_ready_sample_publishes_cnn_metadata(
         ArrayExtractor(),
         tmp_path / "delivery",
         CROP_SIZE,
-        VERSION,
+        dataset_version=VERSION,
     )
 
     # 検証
     assert (summary.output.cnn_path / "metadata.sqlite3").is_file()
+
+
+@pytest.mark.parametrize("mask_rgb_background", [False, True])
+def test_process_passes_prepared_rgb_and_optional_mask_to_inference(
+    session_root: tuple[Path, Path],
+    tmp_path: Path,
+    mask_rgb_background: bool,
+) -> None:
+    """整形済みRGBと設定に応じたmaskを推論器へ渡す。"""
+    repository = SessionSam3Repository(session_root[0], TIMEOUT_SECONDS)
+    extractor = ArrayExtractor()
+    process_approved_samples(
+        repository.load_ready_samples(),
+        repository,
+        extractor,
+        tmp_path / "delivery",
+        CROP_SIZE,
+        dataset_version=VERSION,
+        mask_rgb_background=mask_rgb_background,
+    )
+    assert extractor.last_rgb is not None
+    assert extractor.last_rgb.size == (CROP_SIZE, CROP_SIZE)
+    if mask_rgb_background:
+        assert extractor.last_mask is not None
+        assert extractor.last_mask.size == (CROP_SIZE, CROP_SIZE)
+    else:
+        assert extractor.last_mask is None
 
 
 def test_process_approved_samples_revoked_during_extraction_raises_without_publishing(
@@ -169,7 +174,7 @@ def test_process_approved_samples_revoked_during_extraction_raises_without_publi
             extractor,
             delivery_root,
             CROP_SIZE,
-            VERSION,
+            dataset_version=VERSION,
         )
     assert not (delivery_root / "cnn").exists()
 
@@ -189,7 +194,7 @@ def test_process_approved_samples_no_samples_raises_contract_error(
             ArrayExtractor(),
             tmp_path / "delivery",
             CROP_SIZE,
-            VERSION,
+            dataset_version=VERSION,
         )
 
 
@@ -203,18 +208,10 @@ def test_process_approved_samples_crop_failure_logs_once_and_excludes_sample(
     repository = SessionSam3Repository(session_root[0], TIMEOUT_SECONDS)
     crop_size = 32
 
-    class CropExtractor(ArrayExtractor):
-        """crop検証を行うダミー抽出器。"""
-
-        def extract(self, sample: ReadySample, destination: Path) -> FeatureArtifact:
-            """実際のcrop検証を通して抽出失敗を再現する。"""
-            prepare_crop(sample, crop_size)
-            return super().extract(sample, destination)
-
     with caplog.at_level(logging.ERROR), pytest.raises(DataContractError, match="全てのready sample"):
         process_approved_samples(
-            repository.load_ready_samples(), repository, CropExtractor(),
-            tmp_path / "delivery", crop_size, VERSION,
+            repository.load_ready_samples(), repository, ArrayExtractor(),
+            tmp_path / "delivery", crop_size, dataset_version=VERSION,
         )
     assert len(caplog.records) == 1
     record = caplog.records[0]

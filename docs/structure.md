@@ -20,6 +20,8 @@ tests/                      pytest
 
 CNN向けファイル構成・SQLite契約の正本は[CNN出力契約](contracts/cnn_delivery.md)、version採番は[自動採番仕様](dataset_version_autonumbering.md)を参照する。
 
+DINOv3推論APIの入出力と、SQL読込・入力整形・推論・保存の責務境界は[DINOv3推論API仕様](dinov3_inference_api.md)を参照する。
+
 ## 維持する設計判断・既存合意
 
 - `common/ports.py`には、必要な抽出器境界`FeatureExtractor`を置く。GPU／モデル依存の推論実装をテストで差し替えるための境界であり、他の処理に薄い抽象化を追加しない。

@@ -12,7 +12,14 @@ from dinov3_pipeline.common.models import DataContractError, ReadySample
 
 @dataclass(frozen=True)
 class CroppedInputs:
-    """学習や保存に使うRGB・mask・depthの crop を格納する。"""
+    """学習や保存に使うRGB・mask・depthのcropを格納する。
+
+    Attributes:
+        rgb: RGB modeのcrop画像。
+        mask: 前景を255、背景を0にしたcrop mask。
+        depth: crop範囲のdepth画像。
+        crop_box: 元画像中のcrop範囲。
+    """
 
     rgb: Image.Image
     mask: Image.Image
@@ -67,7 +74,17 @@ def prepare_crop(
 
 
 def _open_modalities(sample: ReadySample) -> tuple[Image.Image, Image.Image, Image.Image]:
-    """RGB・mask・depthの3画像を入出力関連の契約に合わせて読み込む。"""
+    """RGB・mask・depthの3画像を入出力契約に合わせて読み込む。
+
+    Args:
+        sample: 画像ファイルのpathを持つ承認済みsample。
+
+    Returns:
+        RGB、8-bit grayscale mask、depth画像。
+
+    Raises:
+        DataContractError: ファイルを開けない場合、または画像寸法が一致しない場合。
+    """
     try:
         with Image.open(sample.rgb_path) as source:
             rgb = source.convert("RGB")
@@ -88,7 +105,20 @@ def _centered_crop_box(
     crop_size: int,
     sample_id: str,
 ) -> tuple[int, int, int, int]:
-    """前景bbox を中心に置く crop の左上・右下座標を計算する。"""
+    """前景bboxを中心に置くcropの左上・右下座標を計算する。
+
+    Args:
+        mask: 前景を0以外で表したmask画像。
+        image_size: 元画像の幅と高さ。
+        crop_size: cropの1辺の長さ。
+        sample_id: エラーメッセージに含めるsample ID。
+
+    Returns:
+        左上と右下のpixel座標。
+
+    Raises:
+        DataContractError: maskが空、または前景bboxがcropに収まらない場合。
+    """
     bounds = mask.getbbox()
     if bounds is None:
         raise DataContractError(f"maskに前景画素がない: {sample_id}")

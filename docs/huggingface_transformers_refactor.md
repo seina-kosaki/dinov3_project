@@ -37,7 +37,7 @@
 
 - 設定、起点から抽出器への引数、および抽出器の公開インターフェースから`repo_dir`と`weights_path`を除く。重みファイルを指定・要求しない。
 - `weights_path`に依存する重みhashの算出、および算出した重みhashを用いるCNN bundle内の整合性確認を行わない。入力RGB/maskのhash検証など、重みパスに依存しない既存の入力保護は維持する。共通hash utility全体を削除する要件ではない。
-- CNN bundleの`dataset_metadata`には`weights_sha256`を出力しない。既存のテーブル・列構造およびその他の合意済みmetadataは維持し、[CNN出力契約](contracts/cnn_delivery.md)を正本とする。
+- CNN bundleの`dataset_metadata`には`weights_sha256`を出力しない。このweights hashに関する差分ではテーブル・列構造およびその他の合意済みmetadataを維持する。現在のSQLite schemaは[出力契約正本](contracts/cnn_delivery.md)に従う。
 - `dataset_version`の重複検出は今回の変更対象外とする。既存データ保護のため、新旧debug出力階層の両方を含む探索と重複拒否を維持する（[自動採番仕様](dataset_version_autonumbering.md)参照）。
 
 ## 動作と責務
@@ -119,12 +119,12 @@ importの向きは、`main.py → settings/common/usecase`、`usecase → data_l
 - SQLiteの`samples`に`feature_block_1_path`〜`feature_block_4_path`列を追加し、それぞれ対応するbundle相対pathを保存する。追加ファイルはCNN向け公開bundleに含め、既存の保存・公開順序を維持する。
 - depthの通常実行時の`mask_depth: false`を含め、crop・depth保存の既定と選択動作は現行どおりとする。
 - CNN bundleの画像形式、SQLiteの2テーブル、debug配置、issue記録、dataset version採番、保存・公開順序は維持する。特徴量ファイルと`samples`列は上記の合意済み変更を適用する。SQLite metadataの`model_name`には選択した公式Hugging Face model IDを記録する。
-- 合意済みの契約差分として、`dataset_metadata`の`weights_sha256` key/value行を出力しない。テーブル・列の構造は維持し、SHA-256 metadata値の算出・記録を新たな要件にしない。差分の表記は[出力契約正本](contracts/cnn_delivery.md)を参照する。
+- 合意済みの契約差分として、`dataset_metadata`の`weights_sha256` key/value行を出力しない。この差分でテーブル・列の構造を変更したり、SHA-256 metadata値の算出・記録を新たな要件にしたりしない。現在のschema差分は[出力契約正本](contracts/cnn_delivery.md)を参照する。
 
 ## 制約・対象外
 
 - `third_party`へのDINOv3 clone、`repo_dir`、`torch.hub`を使わない。依存関係、config、README等のセットアップ手順を同じ方針に揃える。
-- ConvNeXt、合意済み特徴量path列以外のSQLite schema変更、既存入力条件・承認検証・採番・保存動作の変更、特徴量shape/layout/dtype変更は対象外。
+- ConvNeXt、合意済み特徴量path列追加および後続合意の`crop_box_json`置換を除くSQLite schema変更、既存入力条件・承認検証・採番・保存動作の変更、特徴量shape/layout/dtype変更は対象外。crop座標のSQLite表現は[出力契約正本](contracts/cnn_delivery.md)に従う。
 - モデル出力の数値を旧`torch.hub`実装と完全一致させることは受け入れ条件ではない。shape・dtype・patch位置の対応は維持する。
 - 実モデルの重みや外部サービスを使わない自動テストを基本とし、モデルロード・出力形式はTransformers境界をmockしたテストで検証する。実モデルでの動作確認は自動テストと区別して記録する。
 

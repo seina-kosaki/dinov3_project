@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import json
 import sqlite3
 from contextlib import closing
 from dataclasses import dataclass, replace
@@ -33,9 +34,9 @@ from dinov3_pipeline.common.models import (
     FeatureSet,
     ReadySample,
 )
+from dinov3_pipeline.data_loading.preprocessing import CroppedInputs, prepare_crop
 from dinov3_pipeline.saving import cnn_bundle_exporter
 from dinov3_pipeline.saving.cnn_bundle_exporter import export_cnn_bundle
-from dinov3_pipeline.data_loading.preprocessing import CroppedInputs, prepare_crop
 
 CROP_SIZE = 32
 VERSION = "capture_v001"
@@ -48,6 +49,10 @@ SAMPLE_COLUMNS = {
     "rgb_path",
     "depth_path",
     "mask_path",
+    "original_rgb_path",
+    "original_mask_path",
+    "original_depth_path",
+    "crop_box_json",
     "feature_path",
     "feature_block_1_path",
     "feature_block_2_path",
@@ -183,6 +188,10 @@ def test_export_cnn_bundle_schema_types_nullability_and_primary_keys(delivered: 
             "rgb_path",
             "depth_path",
             "mask_path",
+            "original_rgb_path",
+            "original_mask_path",
+            "original_depth_path",
+            "crop_box_json",
             "feature_path",
             "feature_block_1_path",
             "feature_block_2_path",
@@ -193,7 +202,17 @@ def test_export_cnn_bundle_schema_types_nullability_and_primary_keys(delivered: 
     with sqlite3.connect(delivered.output.cnn_path / "metadata.sqlite3") as connection:
         columns = list(connection.execute(f"PRAGMA table_info({table})"))
         rows = list(connection.execute(f"SELECT * FROM {table}"))  # noqa: S608 - tableは固定のテストパラメータ
-        assert [(row[1], row[2], row[3], row[4], row[5]) for row in columns] == [(name, "TEXT", int(index != 0), None, int(index == 0)) for index, name in enumerate(names)]
+        expected_schema = [
+            (
+                name,
+                "TEXT",
+                int(index != 0),
+                None,
+                int(index == 0),
+            )
+            for index, name in enumerate(names)
+        ]
+        assert [(row[1], row[2], row[3], row[4], row[5]) for row in columns] == expected_schema
         assert rows
         assert all(isinstance(value, str) for row in rows for value in row)
         # TEXT PRIMARY KEYだけではNULLを拒否しない（確認後はrollbackする）。
@@ -333,8 +352,8 @@ def test_export_cnn_bundle_valid_sample_copies_feature_npy_unchanged(
         f"features/{key}.npy",
         *(f"feature_block_{index}/{key}.npy" for index in range(1, 5)),
     ]
-    assert list(row[8:]) == expected_paths
-    for key_name, relative in zip(feature_keys, row[8:]):
+    assert list(row[12:]) == expected_paths
+    for key_name, relative in zip(feature_keys, row[12:]):
         copied = np.load(delivered.output.cnn_path / relative, allow_pickle=False)
         np.testing.assert_array_equal(copied, delivered.artifact.features[key_name])
         assert copied.dtype == np.float32
@@ -425,17 +444,24 @@ def test_export_cnn_bundle_unsafe_version_raises_contract_error(make_sample: Sam
         )
 
 
-def test_export_cnn_bundle_saves_prepared_images_without_reading_sources(
+def test_export_cnn_bundle_copies_original_files_and_preserves_crop(
     make_sample: SampleFactory,
     tmp_path: Path,
 ) -> None:
-    """保存部は受け取った整形済みデータを使い、原画像を再読込しない。"""
+    """元画像は入力形式・bytesを保ってコピーし、crop画像も保存する。"""
     sample = make_sample(mask_box=(16, 16, 48, 48))
+    rgb_path = sample.rgb_path.with_suffix(".jpg")
+    mask_path = sample.mask_path.with_suffix(".bmp")
+    depth_path = sample.depth_path.with_suffix(".tif")
+    with Image.open(sample.rgb_path) as source:
+        source.save(rgb_path, format="JPEG")
+    with Image.open(sample.mask_path) as source:
+        source.save(mask_path, format="BMP")
+    with Image.open(sample.depth_path) as source:
+        source.save(depth_path, format="TIFF")
+    sample = replace(sample, rgb_path=rgb_path, mask_path=mask_path, depth_path=depth_path)
     artifact = _artifact(tmp_path)
     cropped = prepare_crop(sample, CROP_SIZE)
-    sample.rgb_path.unlink()
-    sample.mask_path.unlink()
-    sample.depth_path.unlink()
     output = export_cnn_bundle(
         tmp_path / "delivery",
         CROP_SIZE,
@@ -445,8 +471,40 @@ def test_export_cnn_bundle_saves_prepared_images_without_reading_sources(
     )
     assert output.exported_count == 1
     row = _row(Delivered(output, sample, artifact, tmp_path / "delivery"))
+    crop_box = json.loads(row[11])
+    assert set(crop_box) == {"x1", "y1", "x2", "y2"}
+    assert all(type(value) is int for value in crop_box.values())
+    assert crop_box == {"x1": 16, "y1": 16, "x2": 48, "y2": 48}
+    assert crop_box["x2"] - crop_box["x1"] == CROP_SIZE
+    assert crop_box["y2"] - crop_box["y1"] == CROP_SIZE
+    original_paths = row[8:11]
+    assert [Path(path).suffix for path in original_paths] == [".jpg", ".bmp", ".tif"]
+    source_paths = (sample.rgb_path, sample.mask_path, sample.depth_path)
+    for source, relative in zip(source_paths, original_paths):
+        copied_path = output.cnn_path / relative
+        assert copied_path.is_file()
+        assert copied_path.read_bytes() == source.read_bytes()
+        assert Path(relative).as_posix() == relative
+    with sqlite3.connect(output.cnn_path / "metadata.sqlite3") as connection:
+        path_columns = [
+            item[1]
+            for item in connection.execute("PRAGMA table_info(samples)")
+            if item[2] == "TEXT" and item[1].endswith("_path")
+        ]
+        all_paths = connection.execute(
+            f"SELECT {', '.join(path_columns)} FROM samples"
+        ).fetchone()
+    for relative in all_paths:
+        assert not Path(relative).is_absolute()
+        assert Path(relative).as_posix() == relative
+        assert (output.cnn_path / relative).is_file()
+
     with Image.open(output.cnn_path / row[5]) as saved_rgb:
         assert np.array_equal(np.asarray(saved_rgb), np.asarray(cropped.rgb))
+    with Image.open(output.cnn_path / row[6]) as saved_depth:
+        assert np.array_equal(np.asarray(saved_depth), np.asarray(cropped.depth))
+    with Image.open(output.cnn_path / row[7]) as saved_mask:
+        assert np.array_equal(np.asarray(saved_mask), np.asarray(cropped.mask))
 
 
 @pytest.mark.parametrize("failure_at", ["none", "cnn", "debug", "issues"])
@@ -474,7 +532,15 @@ def test_export_cnn_bundle_publication_order_and_failure_state(
             assert not cnn.exists()
             with closing(sqlite3.connect(source / "metadata.sqlite3")) as connection:
                 row = connection.execute("SELECT * FROM samples").fetchone()
-                assert all((source / relative).is_file() for relative in row[5:])
+                path_columns = [
+                    item[1]
+                    for item in connection.execute("PRAGMA table_info(samples)")
+                    if item[2] == "TEXT" and item[1].endswith("_path")
+                ]
+                path_values = connection.execute(
+                    f"SELECT {', '.join(path_columns)} FROM samples"
+                ).fetchone()
+                assert all((source / relative).is_file() for relative in path_values)
                 assert connection.execute("SELECT COUNT(*) FROM dataset_metadata").fetchone() == (6,)
         else:
             assert (cnn / "metadata.sqlite3").is_file()

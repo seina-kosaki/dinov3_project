@@ -48,7 +48,7 @@ C:\work\SPD\dinov3_delivery\cnn\<dataset_version>/
 
 - [契約正本の保存・公開節](contracts/cnn_delivery.md#保存公開読取可能時点)の順序を維持する。一時領域で書き出し、SQLiteのcommit・close、issues.csv生成とdebug出力先の存在確認後にCNNを公開し、その後PCAのディレクトリを相対pathのソート順、issues.csvを最後に移動する。
 - 公開前の書き込み・出力先確認、またはCNN移動自体の失敗では新しいCNNを公開しない。CNN公開後のdebug移動失敗では、完成済みCNNと移動済みdebugを残し、未移動分は通常の例外終了時に一時領域とともに削除する。ロールバック、一括トランザクション、完了マーカーは追加しない。
-- CNNの読取可能時点はCNN directoryの移動完了時点のまま。CNNの存在だけでdebug完了や実行全体成功と判断しない。特徴量ディレクトリとSQLite path列は契約正本の合意済み構成を使い、その他のCNN bundle構成と公開済み成果物の非上書き方針を維持する。
+- CNNの読取可能時点はCNN directoryの移動完了時点のまま。CNNの存在だけでdebug完了や実行全体成功と判断しない。特徴量ディレクトリとSQLite path列は契約正本の合意済み構成を使い、今回合意した元画像の保存・SQLite path列・`crop_box_json`へのcrop座標列置換を除くCNN bundle構成と公開済み成果物の非上書き方針を維持する。
 
 ### 実装方針・受け入れ条件
 
@@ -58,7 +58,7 @@ C:\work\SPD\dinov3_delivery\cnn\<dataset_version>/
 2. 実行issues.csvが`debug/<dataset_version>/issues.csv`に保存される。PCA失敗理由の記録とCNN特徴量の維持も確認する。
 3. 新階層だけ、旧PCA階層だけ、旧issues階層だけが残る各ケースで使用済みversionを検出する。CNNだけ・予約記録だけが残る場合も従来どおり保護する。自動採番は使用済み最大番号の次、明示指定は重複拒否となる。
 4. 既存の新旧出力を移動・上書きせず、同名出力への公開を拒否する。
-5. CNNの構成・DB・特徴量・PCA画像の名前と内容が不変であり、公開順序と失敗時の残存状態が上記に一致する。
+5. 今回合意した元画像の保存とSQLite列追加を反映したCNN契約を守り、PCA画像の名前と内容、公開順序と失敗時の残存状態が上記に一致する。
 
 自動検証は`tests/test_cnn_bundle_exporter.py`（パス・内容・公開失敗）、`tests/test_dataset_version.py`（新旧階層の採番・重複検出）、`tests/test_main_entrypoint.py`（実行起点の採番連携）で行う。実データでの手動確認は別途実施する。
 

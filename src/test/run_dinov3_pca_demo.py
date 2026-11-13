@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image
 
 from dinov3_pipeline.dinov3.extractor import Dinov3FeatureExtractor
 from dinov3_pipeline.saving.pca_visualizer import save_pca_visualization
@@ -15,6 +15,8 @@ from dinov3_pipeline.settings import load_settings
 
 LOGGER = logging.getLogger(__name__)
 OUTPUT_DIRECTORY = Path(__file__).resolve().parent / "output"
+INPUT_IMAGE_PATH = Path(r"E:\医療分野\datasets\SAM3\labeled_surgical_tools\20260910\train\verified\straight_dissection_clamp\raw") / "separado37.png"
+PATCH_SIZE = 16
 FEATURE_KEYS = (
     "feature_block_1",
     "feature_block_2",
@@ -24,30 +26,24 @@ FEATURE_KEYS = (
 )
 
 
-def _create_dummy_image(size: int, destination: Path) -> None:
-    """Pillowで色や形状に変化のあるテスト画像を作成する。"""
-    image = Image.new("RGB", (size, size), (24, 36, 56))
-    draw = ImageDraw.Draw(image)
-    draw.rectangle((0, 0, size // 2, size // 2), fill=(220, 70, 50))
-    draw.ellipse((size // 3, size // 3, size - 1, size - 1), fill=(40, 180, 120))
-    draw.line((0, size - 1, size - 1, 0), fill=(240, 220, 60), width=max(1, size // 32))
-    image.save(destination)
-
-
 def main() -> None:
-    """画像生成、DINOv3推論、PCA画像出力を順に実行する。"""
+    """指定画像のDINOv3推論とPCA画像出力を順に実行する。"""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     settings = load_settings()
     OUTPUT_DIRECTORY.mkdir(parents=True, exist_ok=True)
 
-    rgb_path = OUTPUT_DIRECTORY / "dummy_rgb.png"
-    mask_path = OUTPUT_DIRECTORY / "dummy_mask.png"
+    mask_path = OUTPUT_DIRECTORY / "input_mask.png"
     pca_path = OUTPUT_DIRECTORY / "pca_comparison.png"
-    _create_dummy_image(settings.crop_size, rgb_path)
-    Image.new("L", (settings.crop_size, settings.crop_size), 255).save(mask_path)
 
-    with Image.open(rgb_path) as source:
+    with Image.open(INPUT_IMAGE_PATH) as source:
+        width = source.width // PATCH_SIZE * PATCH_SIZE
+        height = source.height // PATCH_SIZE * PATCH_SIZE
+        if width == 0 or height == 0:
+            raise ValueError(f"画像の縦横は{PATCH_SIZE}ピクセル以上必要です: {source.size}")
         rgb_image = source.convert("RGB")
+        if rgb_image.size != (width, height):
+            rgb_image = rgb_image.resize((width, height), Image.Resampling.LANCZOS)
+    Image.new("L", rgb_image.size, 255).save(mask_path)
 
     extractor = Dinov3FeatureExtractor(
         settings.model_name,
@@ -67,7 +63,7 @@ def main() -> None:
 
         save_pca_visualization(
             tuple(feature_paths),
-            rgb_path,
+            INPUT_IMAGE_PATH,
             mask_path,
             pca_path,
             mask_rgb_background=True,

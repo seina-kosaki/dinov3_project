@@ -72,7 +72,7 @@ dinov3_delivery/
 
 RGB・depth・maskはmaskのforeground boundsを含む同じcrop座標で切り出し、resize/paddingは行わない。`mask_rgb_background`は既定`true`で、RGB cropの背景置換、DINO入力へのmask適用、PCAの前景patch選択を行う。`false`ではRGBを置換せず、DINO入力へmaskを適用せず、PCAで全patchを使う。いずれの場合もmaskは検証・crop位置決定に使い、二値PNGを保存する。depthは通常実行の既定`mask_depth: false`ではcrop内のmask外も元値を保ち、`true`時だけmask外を0にする。元ファイルは変更しない。depthはDINOv3へは入力せず、CNN用cropとして保存する。全特徴量NPYは`float32`の`(Hpatch, Wpatch, C)`で、`feature`は最終BlockのFinal LayerNorm適用後、`feature_block_1`〜`4`は層位置`L/4, L/2, 3L/4, L`のFinal LayerNorm適用前の出力である。sample行のSQLiteには既存の`feature_path`と4つのblock特徴量pathを保存する。
 
-CNN用SQLiteは`dataset_metadata`と`samples`の2テーブルだけである。sample行には`sample_id`、`instrument_uid`、`session_id`、`image_id`、`capture_date`と、RGB/depth/mask/feature/feature_block_1〜4のbundle相対pathを保存する。モデル名、cropサイズ、特徴量layout等はdataset単位のmetadataにまとめる。`dataset_metadata`の`weights_sha256` keyは出力しない。特徴量directoryおよび`samples`の追加path列を含む詳細は[CNN出力契約](docs/contracts/cnn_delivery.md#合意済みの契約差分)を参照する。出力versionは上書きしない。
+CNN用SQLiteは`dataset_metadata`と`samples`の2テーブルだけである。sample行には`sample_id`、`instrument_uid`、`session_id`、`image_id`、`capture_date`と、RGB/depth/mask/feature/feature_block_1〜4のbundle相対pathを保存する。元画像上のcrop範囲は`samples.crop_box_json`（JSON objectを格納したTEXT）に保存し、座標の解釈はRGB/depth/mask共通とする。モデル名、cropサイズ、特徴量layout等はdataset単位のmetadataにまとめる。`dataset_metadata`の`weights_sha256` keyは出力しない。特徴量directoryおよびSQLite schemaの詳細は[CNN出力契約](docs/contracts/cnn_delivery.md)を参照する。出力versionは上書きしない。
 
 ## 補足
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import json
 import re
 import shutil
 import sqlite3
@@ -48,6 +49,10 @@ CREATE TABLE samples(
     rgb_path TEXT NOT NULL,
     depth_path TEXT NOT NULL,
     mask_path TEXT NOT NULL,
+    original_rgb_path TEXT NOT NULL,
+    original_mask_path TEXT NOT NULL,
+    original_depth_path TEXT NOT NULL,
+    crop_box_json TEXT NOT NULL,
     feature_path TEXT NOT NULL,
     feature_block_1_path TEXT NOT NULL,
     feature_block_2_path TEXT NOT NULL,
@@ -56,6 +61,9 @@ CREATE TABLE samples(
 );
 """
 FEATURE_BLOCK_DIRS = tuple(f"feature_block_{index}" for index in range(1, 5))
+ORIGINAL_RGB_DIR = "original_rgb"
+ORIGINAL_MASK_DIR = "original_masks"
+ORIGINAL_DEPTH_DIR = "original_depth"
 FEATURE_KEYS = (
     "feature",
     "feature_block_1",
@@ -64,7 +72,8 @@ FEATURE_KEYS = (
     "feature_block_4",
 )
 SAMPLE_INSERT_QUERY = (
-    "INSERT INTO samples VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "INSERT INTO samples VALUES "
+    "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
 
 
@@ -126,7 +135,16 @@ def export_cnn_bundle(
         bundle = staging / CNN_DIR / dataset_version
         debug = staging / DEBUG_DIR
         bundle.mkdir(parents=True, exist_ok=True)
-        for name in (RGB_DIR, DEPTH_DIR, MASK_DIR, FEATURE_DIR, *FEATURE_BLOCK_DIRS):
+        for name in (
+            RGB_DIR,
+            DEPTH_DIR,
+            MASK_DIR,
+            ORIGINAL_RGB_DIR,
+            ORIGINAL_MASK_DIR,
+            ORIGINAL_DEPTH_DIR,
+            FEATURE_DIR,
+            *FEATURE_BLOCK_DIRS,
+        ):
             (bundle / name).mkdir(parents=True, exist_ok=True)
 
         result = _write_samples(
@@ -184,6 +202,9 @@ def _write_samples(
         rgb = PurePosixPath(RGB_DIR) / f"{key}{IMAGE_SUFFIX}"
         depth = PurePosixPath(DEPTH_DIR) / f"{key}{DEPTH_SUFFIX}"
         mask = PurePosixPath(MASK_DIR) / f"{key}{IMAGE_SUFFIX}"
+        original_rgb = PurePosixPath(ORIGINAL_RGB_DIR) / f"{key}{sample.rgb_path.suffix}"
+        original_mask = PurePosixPath(ORIGINAL_MASK_DIR) / f"{key}{sample.mask_path.suffix}"
+        original_depth = PurePosixPath(ORIGINAL_DEPTH_DIR) / f"{key}{sample.depth_path.suffix}"
         feature = PurePosixPath(FEATURE_DIR) / f"{key}{FEATURE_SUFFIX}"
         feature_blocks = tuple(
             PurePosixPath(directory) / f"{key}{FEATURE_SUFFIX}"
@@ -194,6 +215,9 @@ def _write_samples(
             _validate_segment(sample.session_id, "session ID")
             _validate_cropped_inputs(cropped, crop_size)
             _validate_feature_set(feature_set.features)
+            _copy_original_image(sample.rgb_path, bundle / original_rgb)
+            _copy_original_image(sample.mask_path, bundle / original_mask)
+            _copy_original_image(sample.depth_path, bundle / original_depth)
             feature_paths = {
                 "feature": feature,
                 "feature_block_1": feature_blocks[0],
@@ -226,6 +250,11 @@ def _write_samples(
             except DataContractError as error:
                 result.issues.append(f"{sample.session_id}/{sample.image_id}: PCA可視化: {error}")
 
+            x1, y1, x2, y2 = cropped.crop_box
+            crop_box_json = json.dumps(
+                {"x1": x1, "y1": y1, "x2": x2, "y2": y2},
+                separators=(",", ":"),
+            )
             result.rows.append(
                 (
                     sample.sample_id,
@@ -236,6 +265,10 @@ def _write_samples(
                     rgb.as_posix(),
                     depth.as_posix(),
                     mask.as_posix(),
+                    original_rgb.as_posix(),
+                    original_mask.as_posix(),
+                    original_depth.as_posix(),
+                    crop_box_json,
                     feature.as_posix(),
                     *(path.as_posix() for path in feature_blocks),
                 )
@@ -252,6 +285,17 @@ def _validate_cropped_inputs(cropped: CroppedInputs, crop_size: int) -> None:
         raise DataContractError("整形済みRGB・mask・depthは設定crop_sizeの同じ寸法である必要がある")
     if cropped.mask.size != expected_size or cropped.depth.size != expected_size:
         raise DataContractError("整形済みRGB・mask・depthは設定crop_sizeの同じ寸法である必要がある")
+    x1, y1, x2, y2 = cropped.crop_box
+    has_expected_width = x2 - x1 == crop_size
+    has_expected_height = y2 - y1 == crop_size
+    has_nonnegative_origin = x1 >= 0 and y1 >= 0
+    if not has_expected_width or not has_expected_height or not has_nonnegative_origin:
+        raise DataContractError("crop_boxは元画像上の有効なhalf-open crop範囲である必要がある")
+
+
+def _copy_original_image(source: Path, destination: Path) -> None:
+    """入力画像ファイルを再エンコードせずbundleへコピーする。"""
+    shutil.copyfile(source, destination)
 
 
 def _validate_feature_set(features: dict[str, np.ndarray]) -> None:

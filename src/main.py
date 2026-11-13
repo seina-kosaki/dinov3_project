@@ -32,24 +32,27 @@ def main() -> int:
     Returns:
         終了コード。全件成功は0、一部失敗は1、実行できなかった場合は2。
     """
+    # 実行状況をINFO以上で記録できるよう、ログのレベルと表示形式を設定する
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     try:
+        # configs/default.yamlと環境変数から、入出力先やモデルなどの実行設定を読み込む
         settings = load_settings()
-        repository = SessionSam3Repository(
-            settings.data_root, settings.sqlite_timeout_seconds
-        )
+
+        # 全session DBを読むためのrepositoryを、共有データの場所とSQLite timeoutで準備する
+        repository = SessionSam3Repository(settings.data_root, settings.sqlite_timeout_seconds)
+
+        # 各session DBから、DINOv3処理の対象として承認されたsampleを読み込む
         loaded = repository.load_ready_samples()
+
         # 対象が無いのにモデルを読み込むと時間とGPUを無駄にするため、先に終了する
         if not loaded.samples:
-            LOGGER.warning(
-                "is_dino_ready=1の有効な入力がない。SAM3で画像承認と物体別採用を確認する"
-            )
+            LOGGER.warning("is_dino_ready=1の有効な入力がない。SAM3で画像承認と物体別採用を確認する")
             return EXIT_ERROR
 
-        dataset_version = reserve_dataset_version(
-            settings.delivery_root, settings.dataset_version
-        )
+        # 出力先で使用中の版と重ならないよう、この実行用のdataset versionを確保する
+        dataset_version = reserve_dataset_version(settings.delivery_root, settings.dataset_version)
         LOGGER.info("delivery version: %s", dataset_version)
+        # 指定されたモデルを読み込み、設定したcropサイズと実行デバイスで抽出器を準備する
         extractor = Dinov3FeatureExtractor(
             settings.model_name,
             settings.pretrain_dataset,
@@ -57,6 +60,7 @@ def main() -> int:
             settings.device,
             settings.mask_rgb_background,
         )
+        # 承認sampleごとに特徴量を推論・抽出し、CNN bundleとdebug可視化を出力する
         summary = process_approved_samples(
             loaded,
             repository,
@@ -85,4 +89,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # mainの結果をプロセスの終了コードとしてOSへ返す
     raise SystemExit(main())

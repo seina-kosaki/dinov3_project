@@ -16,8 +16,8 @@ model_name: facebook/dinov3-vits16-pretrain-lvd1689m
 # 重みの事前学習データ。正規化統計の選択に使う（lvd1689m / sat493m）
 pretrain_dataset: lvd1689m
 
-# PyTorch device string（cuda:0 / cpuなど）。# null: 自動選択 / "cuda:0": GPU 0 / "cpu": CPU
-device: cuda:0
+# PyTorch device: nullで自動選択 / "cuda:0"でGPU 0 / "cpu"でCPU
+device: "cuda:0"
 # RGB・depth・mask共通の正方形crop辺長（px）。実測ready maskの最大寸法(581x577)を収め、patch size 16で割り切れる値
 crop_size: 672
 # true: depthのmask外を0にする / false: crop内のdepth生値をそのまま保存する

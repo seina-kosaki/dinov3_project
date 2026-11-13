@@ -38,6 +38,8 @@ from dinov3_pipeline.common.constants import (
 )
 
 
+# 学習メモ: BaseSettingsを継承すると、型付きの設定項目を環境変数や設定ファイルから読み込み検証する。
+# 自分で各ファイルを読み込んで型変換する代わりに、Pydanticにその処理を任せるために使う。
 class Settings(BaseSettings):
     """実行設定。モデルとcropサイズは設定だけで切り替えられる。
 
@@ -46,6 +48,8 @@ class Settings(BaseSettings):
         crop_size がモデルの patch size で割り切れるかは、モデル読込後に抽出器が検証する。
     """
 
+    # 学習メモ: SettingsConfigDictはPydanticの設定を型付きで指定する。通常の辞書でも書けるが、設定名の補完を得るために使う。
+    # YAMLの場所、環境変数の接頭辞、余分な項目や生成後の変更の扱いをここで決める。
     model_config = SettingsConfigDict(
         env_prefix=ENV_PREFIX,
         yaml_file=DEFAULT_CONFIG_PATH,
@@ -54,6 +58,8 @@ class Settings(BaseSettings):
         frozen=True,
     )
 
+    # 学習メモ: 型注釈が設定値の型を示し、Field(...)で既定値や追加条件を指定する。
+    # 単純な項目は注釈だけで定義し、正の値や名前形式などの条件がある項目にFieldを使う。
     data_root: Path
     delivery_root: Path
     dataset_version: str | None = Field(default=None, pattern=f"^{SAFE_NAME_PATTERN}$")
@@ -65,7 +71,10 @@ class Settings(BaseSettings):
     mask_rgb_background: bool
     sqlite_timeout_seconds: float = Field(gt=0)
 
+    # 学習メモ: @field_validator(...)は検証関数を項目に登録するデコレータ。
+    # 関数呼び出しで書くならfield_validator(...)(関数)となり、設定生成時に自動検証するために使う。
     @field_validator("data_root", "delivery_root")
+    # 学習メモ: @classmethodは設定クラスをclsとして受け取る（method = classmethod(method)の短縮形）。
     @classmethod
     def _resolve_from_config_dir(cls, value: Path) -> Path:
         """相対パスを設定ディレクトリ基準の絶対パスへ解決する。
@@ -136,6 +145,7 @@ class Settings(BaseSettings):
         Returns:
             優先度の高い順の設定ソース。
         """
+        # 先に並べた読み込み元ほど優先する。dotenvとsecretは返さないため、この設定では読み込まない。
         return (init_settings, env_settings, YamlConfigSettingsSource(settings_cls))
 
 

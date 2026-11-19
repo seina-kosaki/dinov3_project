@@ -16,7 +16,6 @@
 from __future__ import annotations
 
 import csv
-import hashlib
 import json
 import sqlite3
 from contextlib import closing
@@ -248,6 +247,39 @@ def test_export_cnn_bundle_valid_sample_records_instrument_session_and_image_ids
     assert row[1:5] == ("INS-000001", "session-001", "image-001", "2026-10-30")
 
 
+@pytest.mark.parametrize(("object_index", "expected_key"), [(0, "image-001_0000"), (12345, "image-001_12345")])
+def test_export_cnn_bundle_uses_image_and_object_index_for_all_paths(
+    make_sample: SampleFactory,
+    tmp_path: Path,
+    object_index: int,
+    expected_key: str,
+) -> None:
+    """全asset名とSQLite pathがimage ID・row_key末尾に一致する。"""
+    sample = make_sample(size=64, mask_box=(16, 16, 48, 48))
+    sample = replace(sample, row_key=(*sample.row_key[:-1], object_index))
+    artifact = _artifact(tmp_path)
+    root = tmp_path / "delivery"
+    output = export_cnn_bundle(root, CROP_SIZE, VERSION, [_record(sample, artifact)], [])
+    row = _row(Delivered(output, sample, artifact, root))
+
+    expected_paths = [
+        f"rgb/{expected_key}.png",
+        f"depth/{expected_key}.tiff",
+        f"masks/{expected_key}.png",
+        f"original_rgb/{expected_key}.png",
+        f"original_masks/{expected_key}.png",
+        f"original_depth/{expected_key}.tiff",
+        f"features/{expected_key}.npy",
+        *(f"feature_block_{index}/{expected_key}.npy" for index in range(1, 5)),
+    ]
+    assert list(row[5:11]) + list(row[12:]) == expected_paths
+    assert all((output.cnn_path / relative).is_file() for relative in expected_paths)
+    pca_path = output.debug_path / VERSION / sample.capture_date / sample.session_id / "pca_rgb" / f"{expected_key}.png"
+    assert pca_path.is_file()
+    assert row[3] == sample.image_id
+    assert row[0] == sample.sample_id
+
+
 def test_export_cnn_bundle_valid_sample_keeps_float_depth_crop(
     delivered: Delivered,
 ) -> None:
@@ -347,7 +379,7 @@ def test_export_cnn_bundle_valid_sample_copies_feature_npy_unchanged(
         "feature_block_3",
         "feature_block_4",
     )
-    key = hashlib.sha256(delivered.sample.sample_id.encode("utf-8")).hexdigest()
+    key = "image-001_0000"
     expected_paths = [
         f"features/{key}.npy",
         *(f"feature_block_{index}/{key}.npy" for index in range(1, 5)),
@@ -368,7 +400,7 @@ def test_export_cnn_bundle_valid_sample_writes_pca_under_date_and_session(
     pca_dir = delivered.output.debug_path / VERSION / "2026-10-30" / "session-001" / "pca_rgb"
 
     # 検証
-    key = hashlib.sha256(delivered.sample.sample_id.encode("utf-8")).hexdigest()
+    key = "image-001_0000"
     pca_path = pca_dir / f"{key}.png"
     assert [path.name for path in pca_dir.glob("*.png")] == [pca_path.name]
     with Image.open(pca_path) as pca:
@@ -442,6 +474,43 @@ def test_export_cnn_bundle_unsafe_version_raises_contract_error(make_sample: Sam
             [_record(sample, _artifact(tmp_path))],
             [],
         )
+
+
+@pytest.mark.parametrize("image_id", ["../outside", "bad/name", ""])
+def test_export_cnn_bundle_unsafe_image_id_is_rejected_before_writing(
+    make_sample: SampleFactory,
+    tmp_path: Path,
+    image_id: str,
+) -> None:
+    """path要素に使えないimage IDで出力先外へ書き込まない。"""
+    sample = make_sample(size=64, mask_box=(16, 16, 48, 48))
+    sample = replace(sample, image_id=image_id)
+    root = tmp_path / "delivery"
+
+    with pytest.raises(DataContractError, match="image ID"):
+        export_cnn_bundle(root, CROP_SIZE, VERSION, [_record(sample, _artifact(tmp_path))], [])
+
+    assert not root.exists()
+    assert not (tmp_path / "outside_0000.png").exists()
+
+
+def test_export_cnn_bundle_duplicate_asset_key_is_rejected_before_writing(
+    make_sample: SampleFactory,
+    tmp_path: Path,
+) -> None:
+    """同じimage ID・object indexのsampleを拒否して上書きを防ぐ。"""
+    sample = make_sample(size=64, mask_box=(16, 16, 48, 48))
+    duplicate = replace(sample, sample_id="different-sample", image_id=sample.image_id.upper())
+    root = tmp_path / "delivery"
+    records = [
+        _record(sample, _artifact(tmp_path, "first")),
+        _record(duplicate, _artifact(tmp_path, "second")),
+    ]
+
+    with pytest.raises(DataContractError, match="asset名が重複"):
+        export_cnn_bundle(root, CROP_SIZE, VERSION, records, [])
+
+    assert not root.exists()
 
 
 def test_export_cnn_bundle_copies_original_files_and_preserves_crop(
@@ -599,8 +668,8 @@ def test_export_cnn_bundle_pca_failure_keeps_cnn_and_records_issues(make_sample:
 def test_export_cnn_bundle_multiple_dates_and_sessions_publish_in_sorted_order(make_sample: SampleFactory, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     sample = make_sample(mask_box=(16, 16, 48, 48))
     samples = [
-        replace(sample, sample_id="third", capture_date="2026-10-31", session_id="session-002"),
-        replace(sample, sample_id="second", session_id="session-002"),
+        replace(sample, sample_id="third", image_id="image-003", row_key=("session-001", "image-003", "prediction-001", "revision-001", 2), capture_date="2026-10-31", session_id="session-002"),
+        replace(sample, sample_id="second", image_id="image-002", row_key=("session-001", "image-002", "prediction-001", "revision-001", 1), session_id="session-002"),
         sample,
     ]
     artifact = _artifact(tmp_path)
@@ -621,7 +690,7 @@ def test_export_cnn_bundle_multiple_dates_and_sessions_publish_in_sorted_order(m
     assert observed == [output.cnn_path, *debug_dirs, root / "debug" / VERSION / "issues.csv"]
     assert output.exported_count == output.visualization_count == 3
     for item in samples:
-        key = hashlib.sha256(item.sample_id.encode("utf-8")).hexdigest()
+        key = f"{item.image_id}_{item.row_key[-1]:04d}"
         pca = root / "debug" / VERSION / item.capture_date / item.session_id / "pca_rgb" / f"{key}.png"
         expected = tmp_path / f"expected-{key}.png"
         cnn_bundle_exporter.save_pca_visualization(

@@ -11,9 +11,10 @@ DINOv3側が生成しCNN側へ渡す自己完結bundleの出力契約を定め�
 - `dataset_metadata`から`weights_sha256` key/value行を削除する。`weights_sha256`は列ではなく、従来`dataset_metadata`に格納していたkeyである。
 - 重みファイルに依存するhashを算出せず、そのhashを使ったbundle内の整合性確認も行わない。これは入力ファイルの既存hash検証には影響しない。
 - `samples`に`feature_block_1_path`〜`feature_block_4_path`列を追加する。既存の列と`feature_path`は維持する。
-- 最終特徴量`features/<sample-key>.npy`に加えて、4つのblock特徴量ファイルをbundleに追加する。ファイル構成・取得層の対応は本書に記載する。
+- 最終特徴量`features/<asset-key>.npy`に加えて、4つのblock特徴量ファイルをbundleに追加する。ファイル構成・取得層の対応は本書に記載する。
 - crop後の画像に加え、入力元のRGB・mask・depth画像を元の画素値・画像形式を保ってbundleに保存し、`samples`に各画像の相対pathを追加する。
 - `samples`の`crop_x1`、`crop_y1`、`crop_x2`、`crop_y2` INTEGER列を廃止し、元画像上のcrop範囲を格納する`crop_box_json` TEXT NOT NULL列に置き換える。
+- crop画像、元画像コピー、debug用PCA画像、5種類の特徴量ファイル名を、`image_id`と`object_index`に基づく名前へ変更する。命名規則は[ファイル命名仕様](../cnn_bundle_filename_naming.md)を参照する。SQLite schemaと識別子列は変更しない。
 
 SQLiteのテーブル数は2つのままとし、上記以外のテーブル・列・metadata keyは追加・変更しない。その他のファイル構成・出力内容・path列は維持する。
 
@@ -28,20 +29,20 @@ SQLiteのテーブル数は2つのままとし、上記以外のテーブル・�
 ```text
 <dataset_version>/
   metadata.sqlite3
-  rgb/<sample-key>.png
-  depth/<sample-key>.tiff
-  masks/<sample-key>.png
-  original_rgb/<sample-key>.<元拡張子>
-  original_depth/<sample-key>.<元拡張子>
-  original_masks/<sample-key>.<元拡張子>
-  features/<sample-key>.npy
-  feature_block_1/<sample-key>.npy
-  feature_block_2/<sample-key>.npy
-  feature_block_3/<sample-key>.npy
-  feature_block_4/<sample-key>.npy
+  rgb/<asset-key>.png
+  depth/<asset-key>.tiff
+  masks/<asset-key>.png
+  original_rgb/<asset-key>.<元拡張子>
+  original_depth/<asset-key>.<元拡張子>
+  original_masks/<asset-key>.<元拡張子>
+  features/<asset-key>.npy
+  feature_block_1/<asset-key>.npy
+  feature_block_2/<asset-key>.npy
+  feature_block_3/<asset-key>.npy
+  feature_block_4/<asset-key>.npy
 ```
 
-`sample-key`はsample_idのUTF-8表現のSHA-256 hex。全特徴量ファイルで同じsample-keyを使う。ファイル参照はSQLiteに`/`区切りのbundle相対pathとして保存する。
+`asset-key`は`{image_id}_{object_index:04d}`。`object_index`は4桁以上のゼロ埋め10進数とし、4桁を超える場合も切り詰めない。同じsampleの画像・元画像コピー・特徴量ファイルで共通の`asset-key`を使う。debug用PCA画像も同じ名前にする。ファイル参照はSQLiteに`/`区切りのbundle相対pathとして保存する。組み合わせの重複時の扱いなど、詳細は[ファイル命名仕様](../cnn_bundle_filename_naming.md)を参照する。
 
 - RGB・depth・maskは同じ座標の`crop_size × crop_size`。resize/paddingは行わず、元ファイルは変更しない。maskは前景255／背景0のPNGで、RGBは`mask_rgb_background: true`時にmask外を0にし、`false`時はcrop内の元RGBを保つ。
 - `original_rgb/`、`original_masks/`、`original_depth/`には、入力元のRGB・mask・depthファイルを元の画素値・画像形式のまま保存する。元ファイルの拡張子を維持し、crop後の画像とは別ファイルとして扱う。
@@ -51,7 +52,7 @@ SQLiteのテーブル数は2つのままとし、上記以外のテーブル・�
 - `mask_rgb_background: true`時はDINOv3入力にもmaskを適用し、PCAは前景patchを対象とする。`false`時はDINOv3入力へのmask適用を省き、PCAはcrop内の全patchを対象とし、可視化のRGB panelには背景除去前のcrop RGBを使う。
 - 通常実行はSettingsの値を渡す。`prepare_crop`・`process_approved_samples`・`export_cnn_bundle`・`save_pca_visualization`を単体で呼ぶ場合のmask引数の既定値は`True`であり、YAMLの既定値とは区別する。
 - 全5種類のNPYは`float32`、`(Hpatch, Wpatch, C)`のHWC layout。縦横のpatch数は`crop_size / model.patch_size`、Cはモデル依存。`model_name`は選択した公式Hugging Face model IDを記録する。
-- `features/<sample-key>.npy`には最終Transformer Blockの出力にFinal LayerNormを適用したPatch Tokenを保存する。
+- `features/<asset-key>.npy`には最終Transformer Blockの出力にFinal LayerNormを適用したPatch Tokenを保存する。
 - `feature_block_1/`〜`feature_block_4/`には、Final LayerNorm適用前のBlock出力を保存する。block数を`L`として、各blockの位置は`L/4`、`L/2`、`3L/4`、`L`。例：12層モデルは3/6/9/12、24層モデルは6/12/18/24、32層モデルは8/16/24/32。よって`feature_block_4`は最終Transformer Block出力のFinal LayerNorm適用前である。
 - いずれもspecial tokenを除いたpatch tokenを保存し、`feature_path`と各`feature_block_N_path`が同sampleの対応ファイルを指す。
 - depthの物理単位・撮影時のRGB/depth位置合わせは保証しない。

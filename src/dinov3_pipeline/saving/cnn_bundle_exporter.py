@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import csv
-import hashlib
 import json
 import re
 import shutil
@@ -123,6 +122,7 @@ def export_cnn_bundle(
     model_names = {feature_set.model_name for _, _, feature_set in records}
     if len(model_names) != 1:
         raise DataContractError("同一bundle内でDINOv3モデルを混在できない")
+    _validate_asset_keys(records)
 
     root = Path(delivery_root).resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -198,7 +198,7 @@ def _write_samples(
     """
     result = _WriteResult()
     for sample, cropped, feature_set in records:
-        key = hashlib.sha256(sample.sample_id.encode("utf-8")).hexdigest()
+        key = _asset_key(sample)
         rgb = PurePosixPath(RGB_DIR) / f"{key}{IMAGE_SUFFIX}"
         depth = PurePosixPath(DEPTH_DIR) / f"{key}{DEPTH_SUFFIX}"
         mask = PurePosixPath(MASK_DIR) / f"{key}{IMAGE_SUFFIX}"
@@ -392,3 +392,30 @@ def _validate_segment(value: str, label: str) -> None:
     """session_id や capture_date などの安全な path segment かどうか検証する。"""
     if re.fullmatch(SAFE_NAME_PATTERN, value) is None:
         raise DataContractError(f"{label}がdirectory名として不正: {value}")
+
+
+def _asset_key(sample: ReadySample) -> str:
+    """画像IDとrow_key末尾のobject indexから安全なasset名を作る。"""
+    image_id = sample.image_id
+    object_index = sample.row_key[-1] if sample.row_key else None
+    image_id_is_safe = isinstance(image_id, str) and re.fullmatch(SAFE_NAME_PATTERN, image_id) is not None
+    has_integer_index = isinstance(object_index, int)
+    is_not_boolean_index = not isinstance(object_index, bool)
+    is_nonnegative_index = has_integer_index and object_index >= 0
+    object_index_is_valid = has_integer_index and is_not_boolean_index and is_nonnegative_index
+    if not image_id_is_safe:
+        raise DataContractError("image IDがファイル名として不正")
+    if not object_index_is_valid:
+        raise DataContractError("object indexは0以上の整数である必要がある")
+    return f"{image_id}_{object_index:04d}"
+
+
+def _validate_asset_keys(records: list[tuple[ReadySample, CroppedInputs, FeatureSet]]) -> None:
+    """重複するasset名を事前に拒否し、ファイル上書きを防ぐ。"""
+    asset_keys: set[str] = set()
+    for sample, _, _ in records:
+        asset_key = _asset_key(sample)
+        normalized_asset_key = asset_key.casefold()
+        if normalized_asset_key in asset_keys:
+            raise DataContractError(f"CNN bundle内でasset名が重複している: {asset_key}")
+        asset_keys.add(normalized_asset_key)

@@ -31,7 +31,7 @@ C:\work\SPD\dinov3_delivery\cnn\<dataset_version>/
 入力は既存の`dataset_version`、sampleの`capture_date`・`session_id`、PCA画像および実行issueとし、内容は変更しない。出力先を次に変更する（日付は実行日ではなくsampleの`capture_date`）。
 
 ```text
-<delivery_root>/debug/<dataset_version>/<日付>/<session_id>/pca_rgb/<既存PNG名>
+<delivery_root>/debug/<dataset_version>/<日付>/<session_id>/pca_rgb/<asset-key>.png
 <delivery_root>/debug/<dataset_version>/issues.csv
 ```
 
@@ -42,7 +42,7 @@ C:\work\SPD\dinov3_delivery\cnn\<dataset_version>/
 <delivery_root>/debug/runs/<dataset_version>/issues.csv
 ```
 
-各PNGは左にcrop RGB、右に前景patchのみをPCA 3成分へ射影した特徴量可視化を配置する。既存PNG名（sample_idのSHA-256 hex + `.png`）、画像内容、特徴量、CSVの形式・記録内容は変更しない。PCAを計算できない場合もCNN特徴量を維持して理由をissues.csvへ記録する現行動作を維持し、PCA画像がなくても実行issues.csvは新階層へ保存する。
+各PNGは左にcrop RGB、右に前景patchのみをPCA 3成分へ射影した特徴量可視化を配置する。新規出力のファイル名は[ファイル命名仕様](cnn_bundle_filename_naming.md)に従う。画像内容、特徴量、CSVの形式・記録内容は変更しない。PCAを計算できない場合もCNN特徴量を維持して理由をissues.csvへ記録する現行動作を維持し、PCA画像がなくても実行issues.csvは新階層へ保存する。
 
 ### 公開・失敗時の維持事項
 
@@ -54,7 +54,7 @@ C:\work\SPD\dinov3_delivery\cnn\<dataset_version>/
 
 変更対象の責務は`src/dinov3_pipeline/saving/cnn_bundle_exporter.py`のPCA・issues出力先と公開先の整合、および`src/dinov3_pipeline/saving/dataset_version.py`の使用済みversion探索である。versionの命名・予約方式は変えず、探索の詳細は[自動採番仕様](dataset_version_autonumbering.md)に従う。
 
-1. 新規PCA画像が`debug/<dataset_version>/<日付>/<session_id>/pca_rgb/<既存PNG名>`に出力される。複数日付・sessionも同じversion配下にまとまる。
+1. 新規PCA画像が`debug/<dataset_version>/<日付>/<session_id>/pca_rgb/<asset-key>.png`に出力される。複数日付・sessionも同じversion配下にまとまる。
 2. 実行issues.csvが`debug/<dataset_version>/issues.csv`に保存される。PCA失敗理由の記録とCNN特徴量の維持も確認する。
 3. 新階層だけ、旧PCA階層だけ、旧issues階層だけが残る各ケースで使用済みversionを検出する。CNNだけ・予約記録だけが残る場合も従来どおり保護する。自動採番は使用済み最大番号の次、明示指定は重複拒否となる。
 4. 既存の新旧出力を移動・上書きせず、同名出力への公開を拒否する。

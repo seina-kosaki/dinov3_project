@@ -8,3 +8,5 @@
 - `docs/learning-notes.md`: PythonやPydanticの初出構文・機能の学習メモを記録する。
 - `docs/structure.md`: プロジェクト全体の構成と責務を説明する。
 - `docs/dinov3_inference_api.md`: DINOv3推論APIの入出力、特徴層の選択、責務境界を定義する。
+- `docs/cnn_bundle_filename_naming.md`: CNN bundle・debug出力・特徴量ファイルの命名規則を定義する。
+- `docs/contracts/cnn_delivery.md`: CNN向けbundleのファイル構成、SQLite schema、保存・公開契約を定義する。

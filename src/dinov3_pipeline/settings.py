@@ -17,10 +17,11 @@
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 from typing import Any
 
-from pydantic import Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -36,6 +37,41 @@ from dinov3_pipeline.common.constants import (
     SAFE_NAME_PATTERN,
     SUPPORTED_MODEL_NAMES,
 )
+
+
+class SessionTarget(BaseModel):
+    """入力対象とする日付と、必要に応じたsession ID。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    date: str
+    session_id: str | None = None
+
+    @field_validator("date")
+    @classmethod
+    def _check_date(cls, value: str) -> str:
+        """存在する暦日をYYYY-MM-DD形式で受け付ける。"""
+        try:
+            parsed_date = date.fromisoformat(value)
+        except ValueError as error:
+            raise ValueError("dateは実在するYYYY-MM-DD形式で指定する") from error
+        if parsed_date.isoformat() != value:
+            raise ValueError("dateは実在するYYYY-MM-DD形式で指定する")
+        return value
+
+    @field_validator("session_id")
+    @classmethod
+    def _check_session_id(cls, value: str | None) -> str | None:
+        """session IDを単一の安全なディレクトリ名に制限する。"""
+        if value is not None and (
+            not value.strip()
+            or value in {".", ".."}
+            or "/" in value
+            or "\\" in value
+            or "\x00" in value
+        ):
+            raise ValueError("session_idは空でない単一のディレクトリ名で指定する")
+        return value
 
 
 # 学習メモ: BaseSettingsを継承すると、型付きの設定項目を環境変数や設定ファイルから読み込み検証する。
@@ -62,6 +98,7 @@ class Settings(BaseSettings):
     # 単純な項目は注釈だけで定義し、正の値や名前形式などの条件がある項目にFieldを使う。
     data_root: Path
     delivery_root: Path
+    targets: list[SessionTarget] | None = None
     dataset_version: str | None = Field(default=None, pattern=f"^{SAFE_NAME_PATTERN}$")
     model_name: str
     pretrain_dataset: str
@@ -70,6 +107,15 @@ class Settings(BaseSettings):
     mask_depth: bool
     mask_rgb_background: bool
     sqlite_timeout_seconds: float = Field(gt=0)
+
+    @model_validator(mode="after")
+    def _check_targets(self) -> Settings:
+        """省略は許可し、明示されたtargetsは空でないことを確認する。"""
+        if self.targets is None and "targets" in self.model_fields_set:
+            raise ValueError("targetsを指定する場合は1件以上の条件を設定する")
+        if self.targets is not None and not self.targets:
+            raise ValueError("targetsを指定する場合は1件以上の条件を設定する")
+        return self
 
     # 学習メモ: @field_validator(...)は検証関数を項目に登録するデコレータ。
     # 関数呼び出しで書くならfield_validator(...)(関数)となり、設定生成時に自動検証するために使う。

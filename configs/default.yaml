@@ -1,6 +1,10 @@
 # 相対パスはこのファイルの位置が基準。DINOV3_<項目名> の環境変数で上書きできる。
 # 入力session SQLite（<日付>/<session_id>/metadata.sqlite3）を探索するroot
 data_root: ../../shared_data
+# 必要な実行だけ日付・sessionを限定する（省略時はdata_root配下すべて）
+targets:
+  - date: "2026-11-13"
+    # session_id: "session_001"  # 省略すると指定日の全session
 # CNN bundle・debug・採番予約記録を保存する出力root
 delivery_root: ../../dinov3_delivery
 # dataset_version省略時はcapture_v001から連番で自動採番する。明示指定は未使用名のみ可。

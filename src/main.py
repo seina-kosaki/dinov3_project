@@ -6,7 +6,7 @@
 
 処理の流れ:
     1. 設定（configs/default.yaml と環境変数）を読み込む。
-    2. 全session DBから is_dino_ready=1 の物体を読む。
+    2. 選択したsession DBから is_dino_ready=1 の物体を読む。
     3. 有効な入力があれば、出力versionを予約する。
     4. DINOv3抽出器を作り、抽出と公開を実行して件数を報告する。
 """
@@ -38,10 +38,13 @@ def main() -> int:
         # configs/default.yamlと環境変数から、入出力先やモデルなどの実行設定を読み込む
         settings = load_settings()
 
-        # 全session DBを読むためのrepositoryを、共有データの場所とSQLite timeoutで準備する
-        repository = SessionSam3Repository(settings.data_root, settings.sqlite_timeout_seconds)
+        # 指定された日付・sessionだけを読むrepositoryを、共有データの場所とtimeoutで準備する
+        targets = None
+        if settings.targets is not None:
+            targets = tuple((target.date, target.session_id) for target in settings.targets)
+        repository = SessionSam3Repository(settings.data_root, settings.sqlite_timeout_seconds, targets)
 
-        # 各session DBから、DINOv3処理の対象として承認されたsampleを読み込む
+        # 選択したsession DBから、DINOv3処理の対象として承認されたsampleを読み込む
         loaded = repository.load_ready_samples()
 
         # 対象が無いのにモデルを読み込むと時間とGPUを無駄にするため、先に終了する

@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import shutil
 import sqlite3
 from pathlib import Path
 
@@ -110,6 +111,64 @@ def test_load_ready_samples_no_database_raises_contract_error(tmp_path: Path) ->
     # 実行・検証
     with pytest.raises(DataContractError, match="見つからない"):
         repository.load_ready_samples()
+
+
+def test_load_ready_samples_selects_or_targets_and_reads_duplicate_db_once(
+    session_root: tuple[Path, Path],
+) -> None:
+    root, database_path = session_root
+    second_database = root / "2026-10-31" / "session-002" / "metadata.sqlite3"
+    second_database.parent.mkdir(parents=True)
+    shutil.copy2(database_path, second_database)
+
+    repository = SessionSam3Repository(
+        root,
+        TIMEOUT_SECONDS,
+        targets=(
+            ("2026-10-30", None),
+            ("2026-10-30", "session-001"),
+            ("2026-10-31", "session-002"),
+        ),
+    )
+
+    loaded = repository.load_ready_samples()
+
+    assert {sample.database_path for sample in loaded.samples} == {
+        database_path.resolve(),
+        second_database.resolve(),
+    }
+    assert len(loaded.samples) == 2
+    assert {sample.capture_date for sample in loaded.samples} == {"2026-10-30", "2026-10-31"}
+
+
+def test_load_ready_samples_missing_target_condition_fails_closed(
+    session_root: tuple[Path, Path],
+) -> None:
+    root, _ = session_root
+    repository = SessionSam3Repository(
+        root,
+        TIMEOUT_SECONDS,
+        targets=(("2026-10-30", None), ("2026-10-31", "missing-session")),
+    )
+
+    with pytest.raises(DataContractError, match="指定対象にsession DBが見つからない"):
+        repository.load_ready_samples()
+
+
+def test_load_ready_samples_selects_only_requested_session(
+    session_root: tuple[Path, Path],
+) -> None:
+    root, database_path = session_root
+    repository = SessionSam3Repository(
+        root,
+        TIMEOUT_SECONDS,
+        targets=(("2026-10-30", "session-001"),),
+    )
+
+    loaded = repository.load_ready_samples()
+
+    assert len(loaded.samples) == 1
+    assert loaded.samples[0].database_path == database_path.resolve()
 
 
 def test_validate_sample_unchanged_input_passes(

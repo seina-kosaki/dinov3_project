@@ -45,6 +45,8 @@ uv run python src/main.py
 
 通常の入力は`shared_data/<日付>/<session_id>/metadata.sqlite3`である。全session DBを読み取り専用で走査し、`sam3_dino_results.is_dino_ready=1`のみを対象にする。抽出前後に承認状態と原本hashを再確認する。
 
+必要な実行では`configs/default.yaml`に`targets`を追加し、日付および必要に応じてsession IDを指定できる。条件はORとして扱い、条件ごとに一致するsession DBがない場合はエラー終了する。`targets`を省略すると従来どおり全sessionが対象になる。詳細と例は[入力対象選択仕様](docs/input_target_selection.md)を参照する。
+
 使用モデルは`configs/default.yaml`の`model_name`で指定する。`crop_size`は固定正方形cropの辺長で、DINOv3のpatch sizeで割り切れる必要がある。既定値672は、確認済みready maskの最大581×577を収める値である。対象maskが指定cropを超えるサンプルは縮小せず、debug issueへ記録して除外する。
 
 ## 出力仕様

@@ -8,8 +8,9 @@ import numpy as np
 import pytest
 
 import main
+from dinov3_pipeline.data_loading.session_repository import SessionSam3Repository
 from dinov3_pipeline.saving import cnn_bundle_exporter
-from dinov3_pipeline.settings import load_settings
+from dinov3_pipeline.settings import SessionTarget, load_settings
 
 
 class ArrayExtractor:
@@ -102,6 +103,32 @@ def test_main_no_inputs_does_not_reserve_or_load_model(
     monkeypatch.setattr(main, "Dinov3FeatureExtractor", unexpected)
     assert main.main() == 2
     assert not delivery_root.exists()
+
+
+def test_main_passes_configured_targets_to_repository(
+    delivery_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = main.load_settings().model_copy(
+        update={"targets": [SessionTarget(date="2026-10-30", session_id="session-001")]}
+    )
+    monkeypatch.setattr(main, "load_settings", lambda: settings)
+    original_repository = main.SessionSam3Repository
+    received_targets: list[tuple[str, str | None]] = []
+
+    def create_repository(
+        data_root: Path,
+        timeout_seconds: float,
+        targets: tuple[tuple[str, str | None], ...] | None = None,
+    ) -> SessionSam3Repository:
+        if targets is not None:
+            received_targets.extend(targets)
+        return original_repository(data_root, timeout_seconds, targets)
+
+    monkeypatch.setattr(main, "SessionSam3Repository", create_repository)
+
+    assert main.main() == 0
+    assert received_targets == [("2026-10-30", "session-001")]
 
 
 def test_main_explicit_version_is_preserved_and_duplicate_rejected_before_model(delivery_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:

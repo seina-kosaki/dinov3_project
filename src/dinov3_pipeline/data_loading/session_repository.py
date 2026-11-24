@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -26,13 +26,19 @@ REVALIDATE_QUERY = f"SELECT * FROM {READY_TABLE} WHERE session_id = ? AND image_
 class SessionSam3Repository:
     """shared_data 配下の session SQLite を読み込み、承認済みサンプルを安全に抽出する。"""
 
-    def __init__(self, data_root: Path, timeout_seconds: float) -> None:
-        """共有データの root と読み取り用 timeout を保持する。"""
+    def __init__(
+        self,
+        data_root: Path,
+        timeout_seconds: float,
+        targets: Sequence[tuple[str, str | None]] | None = None,
+    ) -> None:
+        """共有データのroot、読み取り用timeout、任意の対象条件を保持する。"""
         self.data_root = Path(data_root).resolve()
         self.timeout_seconds = timeout_seconds
+        self.targets = tuple(targets) if targets is not None else None
 
     def load_ready_samples(self) -> SampleLoadResult:
-        """全session DBから承認済みsampleを集め、読み取り契約を検証する。
+        """選択したsession DBから承認済みsampleを集め、読み取り契約を検証する。
 
         Returns:
             検証済みsampleと処理対象外のissue一覧。
@@ -40,7 +46,7 @@ class SessionSam3Repository:
         Raises:
             DataContractError: 対象rootにsession metadata.sqlite3がない場合。
         """
-        database_paths = sorted(self.data_root.glob(SESSION_DB_GLOB))
+        database_paths = self._find_database_paths()
         if not database_paths:
             raise DataContractError(f"session metadata.sqlite3が見つからない: {self.data_root}")
 
@@ -51,6 +57,59 @@ class SessionSam3Repository:
             samples.extend(found)
             issues.extend(problems)
         return SampleLoadResult(tuple(samples), tuple(issues))
+
+    def _find_database_paths(self) -> list[Path]:
+        """root内のDBを安全に列挙し、指定条件に一致するものだけ返す。"""
+        found_paths = sorted(self.data_root.glob(SESSION_DB_GLOB))
+        safe_paths = self._validate_database_paths(found_paths)
+        if self.targets is None:
+            return safe_paths
+        if not self.targets:
+            raise DataContractError("targetsを指定する場合は1件以上の条件が必要")
+
+        selected_paths: set[Path] = set()
+        for target_date, target_session_id in self.targets:
+            matching_paths = [
+                database_path
+                for database_path in safe_paths
+                if self._matches_target(database_path, target_date, target_session_id)
+            ]
+            if not matching_paths:
+                target_label = target_date
+                if target_session_id is not None:
+                    target_label = f"{target_date}/{target_session_id}"
+                raise DataContractError(f"指定対象にsession DBが見つからない: {target_label}")
+            selected_paths.update(matching_paths)
+        return sorted(selected_paths)
+
+    def _validate_database_paths(self, database_paths: list[Path]) -> list[Path]:
+        """DB pathがroot直下の日付・session構成から逸脱していないか確認する。"""
+        safe_paths: set[Path] = set()
+        for database_path in database_paths:
+            resolved_path = database_path.resolve()
+            if not resolved_path.is_relative_to(self.data_root):
+                raise DataContractError(f"session DBがdata_root外を指している: {database_path}")
+            relative_parts = resolved_path.relative_to(self.data_root).parts
+            expected_depth = 3
+            has_expected_layout = (
+                len(relative_parts) == expected_depth
+                and relative_parts[-1] == "metadata.sqlite3"
+            )
+            if not has_expected_layout:
+                raise DataContractError(f"session DBの配置が想定外: {database_path}")
+            safe_paths.add(resolved_path)
+        return sorted(safe_paths)
+
+    @staticmethod
+    def _matches_target(
+        database_path: Path,
+        target_date: str,
+        target_session_id: str | None,
+    ) -> bool:
+        """DBの直上の日付・session名を指定条件と照合する。"""
+        date_matches = database_path.parents[1].name == target_date
+        session_matches = target_session_id is None or database_path.parent.name == target_session_id
+        return date_matches and session_matches
 
     def validate_sample(self, sample: ReadySample) -> None:
         """sampleが最初の承認時点と同じ状態を保っているか確認する。

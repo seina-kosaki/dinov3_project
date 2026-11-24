@@ -56,6 +56,7 @@ def test_load_settings_default_yaml_returns_positive_crop_size() -> None:
     assert settings.crop_size > 0
     assert settings.mask_depth is False
     assert settings.mask_rgb_background is True
+    assert settings.targets is None
 
 
 def test_load_settings_default_version_is_automatic(
@@ -183,3 +184,32 @@ def test_load_settings_invalid_value_raises_validation_error(
     # 準備・実行・検証
     with pytest.raises(ValidationError):
         load_settings(**{name: value})
+
+
+@pytest.mark.parametrize(
+    "targets",
+    [
+        [],
+        None,
+        [{"session_id": "session-001"}],
+        [{"date": "2026-02-30"}],
+        [{"date": "2026-11-24", "session_id": "../outside"}],
+        [{"date": "2026-11-24", "sessionid": "session-001"}],
+    ],
+)
+def test_load_settings_rejects_invalid_targets(targets: object) -> None:
+    with pytest.raises(ValidationError):
+        load_settings(targets=targets)
+
+
+def test_load_settings_accepts_date_and_optional_session_targets() -> None:
+    settings = load_settings(
+        targets=[
+            {"date": "2026-11-24"},
+            {"date": "2026-11-25", "session_id": "session_002"},
+        ]
+    )
+    assert [(target.date, target.session_id) for target in settings.targets or []] == [
+        ("2026-11-24", None),
+        ("2026-11-25", "session_002"),
+    ]

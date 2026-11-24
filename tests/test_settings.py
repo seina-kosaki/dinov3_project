@@ -194,6 +194,9 @@ def test_load_settings_invalid_value_raises_validation_error(
         [{"session_id": "session-001"}],
         [{"date": "2026-02-30"}],
         [{"date": "2026-11-24", "session_id": "../outside"}],
+        [{"date": "2026-11-24", "session_ids": []}],
+        [{"date": "2026-11-24", "session_ids": ["session-001", "../outside"]}],
+        [{"date": "2026-11-24", "session_id": "session-001", "session_ids": ["session-002"]}],
         [{"date": "2026-11-24", "sessionid": "session-001"}],
     ],
 )
@@ -207,9 +210,14 @@ def test_load_settings_accepts_date_and_optional_session_targets() -> None:
         targets=[
             {"date": "2026-11-24"},
             {"date": "2026-11-25", "session_id": "session_002"},
+            {"date": "2026-11-26", "session_ids": ["session_003", "session_004"]},
         ]
     )
-    assert [(target.date, target.session_id) for target in settings.targets or []] == [
-        ("2026-11-24", None),
-        ("2026-11-25", "session_002"),
+    assert [
+        (target.date, target.session_id, target.session_ids)
+        for target in settings.targets or []
+    ] == [
+        ("2026-11-24", None, None),
+        ("2026-11-25", "session_002", None),
+        ("2026-11-26", None, ["session_003", "session_004"]),
     ]

@@ -46,6 +46,7 @@ class SessionTarget(BaseModel):
 
     date: str
     session_id: str | None = None
+    session_ids: list[str] | None = None
 
     @field_validator("date")
     @classmethod
@@ -72,6 +73,25 @@ class SessionTarget(BaseModel):
         ):
             raise ValueError("session_idは空でない単一のディレクトリ名で指定する")
         return value
+
+    @field_validator("session_ids")
+    @classmethod
+    def _check_session_ids(cls, values: list[str] | None) -> list[str] | None:
+        """複数指定が空でなく、安全なsession IDだけを含むことを確認する。"""
+        if values is not None:
+            if not values:
+                raise ValueError("session_idsは1件以上のsession IDを指定する")
+            for value in values:
+                cls._check_session_id(value)
+        return values
+
+    @model_validator(mode="after")
+    def _check_session_target_fields(self) -> SessionTarget:
+        """単数指定と複数指定を同じ条件に併記しない。"""
+        has_both_session_fields = {"session_id", "session_ids"}.issubset(self.model_fields_set)
+        if has_both_session_fields:
+            raise ValueError("session_idとsession_idsは同時に指定できない")
+        return self
 
 
 # 学習メモ: BaseSettingsを継承すると、型付きの設定項目を環境変数や設定ファイルから読み込み検証する。

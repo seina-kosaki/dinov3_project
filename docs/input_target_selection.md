@@ -8,9 +8,10 @@
 
 - 入力rootは `configs/default.yaml` の `data_root` とする。現在の構成では `data_root/<日付>/<session_id>/metadata.sqlite3` を探索する。
 - `targets` は任意の設定項目とする。省略した場合は `data_root` 配下のすべての日付・セッションを対象とする。
-- `targets` を指定する場合、1件以上の条件を含める。各条件は `date` を必須とし、`session_id` は任意とする。
+- `targets` を指定する場合、1件以上の条件を含める。各条件は `date` を必須とし、`session_id` または `session_ids` は任意とする。
 - `date` は `data_root` 直下の日付ディレクトリ名（`YYYY-MM-DD`）を指定する。
-- `session_id` は対象日付のセッションディレクトリ名を指定する。
+- `session_id` は対象日付のセッションディレクトリ名を1つ指定する。
+- `session_ids` は対象日付のセッションディレクトリ名を1件以上のリストで指定する。同じ条件内で `session_id` と `session_ids` は併用できない。
 
 対象を指定しない場合は `targets` を記載しない。
 
@@ -28,6 +29,12 @@ targets:
 ```yaml
 targets:
   - date: "2026-11-24"
+    session_ids: ["session_001", "session_002"]
+```
+
+```yaml
+targets:
+  - date: "2026-11-24"
   - date: "2026-11-25"
     session_id: "session_002"
 ```
@@ -35,9 +42,11 @@ targets:
 ## 動作
 
 - 条件を複数指定した場合はOR条件として扱う。
-- `session_id` を省略した条件は、その日付の全セッションを選択する。指定した場合は、その日付の該当セッションだけを選択する。
+- `session_id` と `session_ids` の両方を省略した条件は、その日付の全セッションを選択する。いずれかを指定した場合は、その日付の該当セッションだけを選択する。
+- `session_ids` の各IDは、既存の単数 `session_id` と同じ安全なディレクトリ名検証を受け、それぞれ独立した日付・セッション条件としてrepositoryへ渡す。
+- 同じIDが `session_ids` 内または複数条件に重複しても設定エラーにはしない。repositoryが同じsession DBを一度だけ選択・読み込みする。
 - 複数条件に同じセッションが該当しても、同じsession DBを一度だけ読み込む。
-- `targets` が空の場合、および `date` がない条件は設定不正として扱う。`session_id` だけの指定は受け付けない。
+- `targets` が空の場合、`date` がない条件、明示された空の `session_ids`、`session_id` と `session_ids` の併記は設定不正として扱う。`session_id` だけの指定は受け付けない。
 - 対象の絞り込みはsession DBの探索時に行い、対象DBの読み取り専用接続、`is_dino_ready=1` の抽出、承認状態と元ファイルの再検証は既存動作を維持する。
 
 ## 制約・対象不存在時の扱い
@@ -55,3 +64,4 @@ targets:
 5. 指定対象に対する既存の承認済みsample選択、読み取り専用処理、再検証および出力動作が維持される。
 6. 指定した各条件が少なくとも1つのsession DBに一致しない場合はエラー終了し、黙って対象を取りこぼさない。
 7. 存在しない暦日や不正な日付形式、パス逸脱を招くsession IDは設定エラーになる。
+8. 同一date内で `session_ids` に複数IDを指定でき、各session DBが選択される。空リストや単数・複数の併記は設定エラーになり、重複IDは同じDBを一度だけ処理する。

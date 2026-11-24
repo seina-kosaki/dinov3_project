@@ -110,7 +110,13 @@ def test_main_passes_configured_targets_to_repository(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     settings = main.load_settings().model_copy(
-        update={"targets": [SessionTarget(date="2026-10-30", session_id="session-001")]}
+        update={
+            "targets": [
+                SessionTarget(date="2026-10-30", session_ids=["session-001", "session-001"]),
+                SessionTarget(date="2026-10-30", session_id="session-001"),
+                SessionTarget(date="2026-10-30"),
+            ]
+        }
     )
     monkeypatch.setattr(main, "load_settings", lambda: settings)
     original_repository = main.SessionSam3Repository
@@ -128,7 +134,12 @@ def test_main_passes_configured_targets_to_repository(
     monkeypatch.setattr(main, "SessionSam3Repository", create_repository)
 
     assert main.main() == 0
-    assert received_targets == [("2026-10-30", "session-001")]
+    assert received_targets == [
+        ("2026-10-30", "session-001"),
+        ("2026-10-30", "session-001"),
+        ("2026-10-30", "session-001"),
+        ("2026-10-30", None),
+    ]
 
 
 def test_main_explicit_version_is_preserved_and_duplicate_rejected_before_model(delivery_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:

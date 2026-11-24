@@ -41,7 +41,14 @@ def main() -> int:
         # 指定された日付・sessionだけを読むrepositoryを、共有データの場所とtimeoutで準備する
         targets = None
         if settings.targets is not None:
-            targets = tuple((target.date, target.session_id) for target in settings.targets)
+            expanded_targets: list[tuple[str, str | None]] = []
+            for target in settings.targets:
+                if target.session_ids is not None:
+                    for session_id in target.session_ids:
+                        expanded_targets.append((target.date, session_id))
+                else:
+                    expanded_targets.append((target.date, target.session_id))
+            targets = tuple(expanded_targets)
         repository = SessionSam3Repository(settings.data_root, settings.sqlite_timeout_seconds, targets)
 
         # 選択したsession DBから、DINOv3処理の対象として承認されたsampleを読み込む

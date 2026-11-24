@@ -3,7 +3,20 @@
 data_root: ../../shared_data
 # 必要な実行だけ日付・sessionを限定する（省略時はdata_root配下すべて）
 targets:
-  - date: "2026-11-13"
+  - date: "2026-11-24"
+    session_ids:
+      - "session_113832_000000_0b4006"
+      - "session_114606_000000_9348e7"
+      - "session_115144_000000_36ee07"
+      - "session_115804_000000_e77a99"
+      - "session_120459_000000_9732ef"
+      - "session_125914_000000_adb533"
+      - "session_130448_000000_73d12b"
+      - "session_131121_000000_b3c333"
+      - "session_131656_000000_67f9f5"
+      - "session_132303_000000_6aac91"
+      - "session_132900_000000_bfac96"
+      - "session_133445_000000_5e10d0"
     # session_id: "session_001"  # 省略すると指定日の全session
 # CNN bundle・debug・採番予約記録を保存する出力root
 delivery_root: ../../dinov3_delivery
